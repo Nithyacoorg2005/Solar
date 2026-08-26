@@ -1,0 +1,160 @@
+import { useEffect, useState } from 'react';
+import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle } from 'lucide-react';
+import { getInspectionById, formatDateTime, formatDate, formatTime } from '@/lib/inspectionApi';
+import type { Inspection } from '@/types';
+import { FaultBadge, StatusBadge, NotificationBadge, ConfidenceBar, Spinner } from './StatusBadges';
+
+interface InspectionDetailsProps {
+  inspectionId: string;
+  onBack: () => void;
+}
+
+export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsProps) {
+  const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const data = await getInspectionById(inspectionId);
+        if (cancelled) return;
+        setInspection(data);
+        if (!data) setError('Inspection not found.');
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load inspection.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [inspectionId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Spinner className="w-6 h-6 text-ink-300" />
+      </div>
+    );
+  }
+
+  if (error || !inspection) {
+    return (
+      <div className="space-y-6">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-ink-500 hover:text-ink-900 transition-colors">
+          <ArrowLeft size={16} /> Back to History
+        </button>
+        <div className="px-5 py-4 bg-red-50 border border-red-200 text-sm text-red-700 rounded-xl">
+          {error ?? 'Inspection not found.'}
+        </div>
+      </div>
+    );
+  }
+
+  const rawClasses = inspection.raw_output?.all_classes as { class: string; confidence: number }[] | undefined;
+
+  return (
+    <div className="space-y-8 max-w-3xl mx-auto animate-fade-in">
+      <button onClick={onBack} className="flex items-center gap-2 text-sm text-ink-500 hover:text-ink-900 transition-colors">
+        <ArrowLeft size={16} /> Back
+      </button>
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight text-ink-900">Inspection Details</h2>
+          <p className="text-sm text-ink-400 mt-1">{formatDateTime(inspection.inspection_at)}</p>
+        </div>
+        <FaultBadge isFault={inspection.is_fault} />
+      </div>
+
+      {/* Image */}
+      <div className="bg-ink-950 rounded-2xl overflow-hidden">
+        {inspection.image_path ? (
+          <img src={inspection.image_path} alt="Inspected solar panel" className="w-full object-contain max-h-[500px]" />
+        ) : (
+          <div className="w-full h-64 flex items-center justify-center">
+            <ImageOff size={32} className="text-ink-600" />
+          </div>
+        )}
+      </div>
+
+      {/* Details grid */}
+      <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-ink-200/60">
+          <DetailCell icon={<MapPin size={14} />} label="Panel / Site" value={inspection.panel_id} />
+          <DetailCell icon={<Calendar size={14} />} label="Date" value={formatDate(inspection.inspection_at)} />
+          <DetailCell icon={<Clock size={14} />} label="Time" value={formatTime(inspection.inspection_at)} />
+          <DetailCell icon={<Cpu size={14} />} label="AI Prediction" value={inspection.prediction ?? 'N/A'} />
+        </div>
+        <div className="px-6 py-5 border-t border-ink-100">
+          <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5"><Cpu size={14} /> Confidence Score</p>
+          <ConfidenceBar confidence={inspection.confidence} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-ink-200/60 border-t border-ink-100">
+          <div className="bg-white px-6 py-5">
+            <p className="text-xs text-ink-400 mb-1.5">Processing Status</p>
+            <StatusBadge status={inspection.processing_status} />
+          </div>
+          <div className="bg-white px-6 py-5">
+            <p className="text-xs text-ink-400 mb-1.5 flex items-center gap-1.5"><Bell size={12} /> Notification</p>
+            <NotificationBadge status={inspection.notification_status} />
+          </div>
+          <div className="bg-white px-6 py-5">
+            <p className="text-xs text-ink-400 mb-1">Trigger Type</p>
+            <p className="text-sm text-ink-700 capitalize">{inspection.trigger_type}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Error message */}
+      {inspection.error_message && (
+        <div className="px-5 py-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+          <p className="font-medium mb-1 flex items-center gap-2"><AlertCircle size={14} /> Error</p>
+          {inspection.error_message}
+        </div>
+      )}
+
+      {/* All classes */}
+      {rawClasses && rawClasses.length > 0 && (
+        <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
+          <div className="px-6 py-4 border-b border-ink-100">
+            <h3 className="text-sm font-semibold text-ink-700">Model Output — All Classes</h3>
+          </div>
+          <div className="p-6 space-y-3">
+            {rawClasses.map((c) => (
+              <div key={c.class} className="flex items-center gap-4">
+                <span className="text-sm text-ink-600 w-32 flex-shrink-0">{c.class}</span>
+                <div className="flex-1"><ConfidenceBar confidence={c.confidence} /></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Raw JSON */}
+      {inspection.raw_output && (
+        <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
+          <div className="px-6 py-4 border-b border-ink-100">
+            <h3 className="text-sm font-semibold text-ink-700">Raw Model Response</h3>
+          </div>
+          <pre className="p-6 text-xs font-mono text-ink-600 overflow-x-auto scrollbar-thin bg-ink-50/50">
+            {JSON.stringify(inspection.raw_output, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailCell({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="bg-white px-6 py-5">
+      <p className="text-xs text-ink-400 mb-1 flex items-center gap-1.5">{icon} {label}</p>
+      <div className="text-sm text-ink-800">{value}</div>
+    </div>
+  );
+}
