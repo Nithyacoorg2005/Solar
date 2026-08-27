@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Camera, RefreshCw, Upload, CheckCircle2, AlertCircle, X, Loader2, CloudSun, Droplets } from 'lucide-react';
+import { Camera, RefreshCw, Upload, CheckCircle2, AlertCircle, X, Loader2, CloudSun, Droplets, ScanSearch } from 'lucide-react';
 import { runInspection } from '@/lib/inspectionApi';
 import { ensureNotificationPermission, sendFaultNotification } from '@/lib/notificationService';
 import { isModelConnected } from '@/lib/modelAdapter';
@@ -260,8 +260,11 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
           </div>
 
           {imageDataUrl && (
-            <div className="bg-ink-950 rounded-2xl overflow-hidden">
-              <img src={imageDataUrl} alt="Inspected solar panel" className="w-full object-contain max-h-[350px]" />
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-ink-400">Original Image</p>
+              <div className="bg-ink-950 rounded-2xl overflow-hidden">
+                <img src={imageDataUrl} alt="Inspected solar panel" className="w-full object-contain max-h-[350px]" />
+              </div>
             </div>
           )}
 
@@ -291,6 +294,7 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
           )}
 
           <InspectionContext result={result} />
+          <GradCamPanel result={result} />
 
           <button
             onClick={resetCapture}
@@ -313,6 +317,42 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
             Back to Preview
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+function GradCamPanel({ result }: { result: Inspection }) {
+  const gradcamImage = result.raw_output?.gradcam_image as string | undefined;
+  const gradcamError = result.raw_output?.gradcam_error as string | undefined;
+
+  if (!gradcamImage && !gradcamError) {
+    return (
+      <div className="bg-white border border-amber-200 rounded-xl p-4">
+        <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5">
+          <ScanSearch size={13} /> AI Explainability - Grad-CAM
+        </p>
+        <p className="text-sm text-amber-700">Grad-CAM heatmap was not returned by the AI service.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
+        <ScanSearch size={13} /> AI Explainability - Grad-CAM
+      </p>
+      {gradcamImage ? (
+        <div className="bg-ink-950 rounded-2xl overflow-hidden">
+          <img src={gradcamImage} alt="Grad-CAM heatmap for uploaded solar panel" className="w-full object-contain max-h-[350px]" />
+        </div>
+      ) : (
+        <div className="px-5 py-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          {gradcamError ?? 'Grad-CAM heatmap could not be generated for this image.'}
+        </div>
+      )}
+      {gradcamImage && gradcamError && (
+        <p className="text-xs text-amber-700">{gradcamError}</p>
       )}
     </div>
   );

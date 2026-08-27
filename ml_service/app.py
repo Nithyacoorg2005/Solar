@@ -4,17 +4,29 @@ from __future__ import annotations
 
 import io
 import os
+import base64
 from pathlib import Path
 
+import numpy as np
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from torch import nn
-from torchvision import models, transforms
+from torchvision import transforms
+
+from services.gradcam import (
+    MODEL_PATH as DEFAULT_MODEL_PATH,
+    GradCAM,
+    colorize_heatmap,
+    get_gradcam_target_layer,
+    get_preprocess_transform,
+    load_solarai_model,
+    run_prediction,
+)
 
 
-MODEL_PATH = Path(os.getenv("MODEL_PATH", "models/solar_panel_classifier.pt"))
+MODEL_PATH = Path(os.getenv("MODEL_PATH", DEFAULT_MODEL_PATH))
 FAULT_CLASSES = {"Bird-drop", "Dusty", "Electrical-damage", "Physical-Damage", "Snow-Covered"}
 app = FastAPI(title="Solar Panel Classifier")
 app.add_middleware(
@@ -27,25 +39,15 @@ app.add_middleware(
 model: nn.Module | None = None
 classes: list[str] = []
 transform: transforms.Compose | None = None
+device = torch.device("cpu")
 
 
 def load_model() -> None:
     global model, classes, transform
     if not MODEL_PATH.is_file():
         raise RuntimeError(f"Model checkpoint not found at {MODEL_PATH.resolve()}. Run train.py first.")
-    checkpoint = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-    classes = checkpoint["classes"]
-    image_size = checkpoint.get("image_size", 224)
-    network = models.resnet18(weights=None)
-    network.fc = nn.Linear(network.fc.in_features, len(classes))
-    network.load_state_dict(checkpoint["model_state"])
-    network.eval()
-    model = network
-    transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    model, classes, image_size, _checkpoint = load_solarai_model(MODEL_PATH, device=device)
+    transform = get_preprocess_transform(image_size)
 
 
 @app.on_event("startup")
@@ -68,17 +70,49 @@ async def predict(image: UploadFile = File(...)) -> dict[str, object]:
         photo = Image.open(io.BytesIO(await image.read())).convert("RGB")
     except UnidentifiedImageError as error:
         raise HTTPException(status_code=400, detail="Invalid image file") from error
-    with torch.inference_mode():
-        probabilities = torch.softmax(model(transform(photo).unsqueeze(0)), dim=1)[0]
+    image_tensor = transform(photo).unsqueeze(0).to(device)
+    class_index, confidence, probabilities = run_prediction(model, image_tensor)
     predictions = [
         {"class": label, "confidence": round(float(probabilities[index]), 6)}
         for index, label in enumerate(classes)
     ]
     predictions.sort(key=lambda entry: entry["confidence"], reverse=True)
-    top = predictions[0]
-    return {
-        "class": top["class"],
-        "confidence": top["confidence"],
-        "is_fault": top["class"] in FAULT_CLASSES,
+    predicted_class = classes[class_index]
+    result: dict[str, object] = {
+        "class": predicted_class,
+        "confidence": round(confidence, 6),
+        "is_fault": predicted_class in FAULT_CLASSES,
         "all_classes": predictions,
     }
+
+    try:
+        target_layer = get_gradcam_target_layer(model)
+        gradcam = GradCAM(model, target_layer)
+        try:
+            heatmap = gradcam.generate(image_tensor, class_index)
+        finally:
+            gradcam.close()
+        result["gradcam_image"] = create_gradcam_data_url(photo, heatmap)
+    except Exception as error:
+        result["gradcam_image"] = None
+        result["gradcam_error"] = f"Grad-CAM generation failed: {error}"
+
+    return result
+
+
+def create_gradcam_data_url(original_image: Image.Image, heatmap: torch.Tensor, alpha: float = 0.45) -> str:
+    original_rgb = original_image.convert("RGB")
+    original_array = np.asarray(original_rgb).astype(np.float32) / 255.0
+
+    heatmap_image = Image.fromarray(np.uint8(heatmap.numpy() * 255), mode="L")
+    heatmap_image = heatmap_image.resize(original_rgb.size, Image.Resampling.BILINEAR)
+    heatmap_array = np.asarray(heatmap_image).astype(np.float32) / 255.0
+    colored_heatmap = colorize_heatmap(heatmap_array)
+
+    overlay = ((1.0 - alpha) * original_array) + (alpha * colored_heatmap)
+    overlay_image = Image.fromarray(np.uint8(np.clip(overlay, 0.0, 1.0) * 255))
+
+    buffer = io.BytesIO()
+    overlay_image.save(buffer, format="JPEG", quality=90)
+    encoded_heatmap = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded_heatmap}"

@@ -80,6 +80,7 @@ function normalizePrediction(raw: unknown): ModelPrediction {
   }
 
   const data = raw as Record<string, unknown>;
+  const explainability = extractExplainability(data);
 
   // Shape 1: { class, confidence, is_fault }
   if (typeof data.class === 'string') {
@@ -87,14 +88,28 @@ function normalizePrediction(raw: unknown): ModelPrediction {
     const isFault = typeof data.is_fault === 'boolean'
       ? data.is_fault
       : data.class.toLowerCase() !== 'healthy' && data.class.toLowerCase() !== 'normal';
-    return { class: data.class, confidence, is_fault: isFault };
+    return {
+      class: data.class,
+      confidence,
+      is_fault: isFault,
+      all_classes: normalizeAllClasses(data.all_classes ?? data.probabilities),
+      ...explainability,
+      raw_response: data,
+    };
   }
 
   // Shape 2: { prediction, confidence }
   if (typeof data.prediction === 'string') {
     const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
     const isFault = data.prediction.toLowerCase() !== 'healthy' && data.prediction.toLowerCase() !== 'normal';
-    return { class: data.prediction, confidence, is_fault: isFault };
+    return {
+      class: data.prediction,
+      confidence,
+      is_fault: isFault,
+      all_classes: normalizeAllClasses(data.all_classes ?? data.probabilities),
+      ...explainability,
+      raw_response: data,
+    };
   }
 
   // Shape 3: { class_index, classes, probabilities }
@@ -105,10 +120,63 @@ function normalizePrediction(raw: unknown): ModelPrediction {
     const confidence = probs[data.class_index] ?? 0;
     const isFault = cls.toLowerCase() !== 'healthy' && cls.toLowerCase() !== 'normal';
     const all_classes = classes.map((c, i) => ({ class: c, confidence: probs[i] ?? 0 }));
-    return { class: cls, confidence, is_fault: isFault, all_classes };
+    return { class: cls, confidence, is_fault: isFault, all_classes, ...explainability, raw_response: data };
   }
 
   throw new Error('Model response did not match any expected format. Update normalizePrediction() to match your model output.');
+}
+
+function normalizeAllClasses(raw: unknown): { class: string; confidence: number }[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+
+  const classes = raw
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const item = entry as Record<string, unknown>;
+      const className = typeof item.class === 'string'
+        ? item.class
+        : typeof item.label === 'string'
+          ? item.label
+          : typeof item.name === 'string'
+            ? item.name
+            : null;
+      const confidence = typeof item.confidence === 'number'
+        ? item.confidence
+        : typeof item.probability === 'number'
+          ? item.probability
+          : typeof item.score === 'number'
+            ? item.score
+            : null;
+
+      return className && confidence != null ? { class: className, confidence } : null;
+    })
+    .filter((entry): entry is { class: string; confidence: number } => entry != null);
+
+  return classes.length > 0 ? classes : undefined;
+}
+
+function extractExplainability(data: Record<string, unknown>): Pick<ModelPrediction, 'gradcam_image' | 'gradcam_error'> {
+  const gradcamImage = firstString(
+    data.gradcam_image,
+    data.gradcam_heatmap,
+    data.heatmap,
+    data.heatmap_url,
+    data.gradcam_url,
+    data.gradcam
+  );
+  const gradcamError = firstString(data.gradcam_error, data.heatmap_error, data.explainability_error);
+
+  return {
+    gradcam_image: gradcamImage,
+    gradcam_error: gradcamError,
+  };
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return null;
 }
 
 export function isModelConnected(): boolean {

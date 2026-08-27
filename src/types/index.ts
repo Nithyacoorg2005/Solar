@@ -40,6 +40,9 @@ export interface ModelPrediction {
   confidence: number;
   is_fault: boolean;
   all_classes?: { class: string; confidence: number }[];
+  gradcam_image?: string | null;
+  gradcam_error?: string | null;
+  raw_response?: Record<string, unknown>;
 }
 
 export interface WeatherSnapshot {
