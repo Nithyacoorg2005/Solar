@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Camera, RefreshCw, Upload, CheckCircle2, AlertCircle, X, Loader2, ImageIcon } from 'lucide-react';
+import { Camera, RefreshCw, Upload, CheckCircle2, AlertCircle, X, Loader2, CloudSun, Droplets } from 'lucide-react';
 import { runInspection } from '@/lib/inspectionApi';
 import { ensureNotificationPermission, sendFaultNotification } from '@/lib/notificationService';
 import { isModelConnected } from '@/lib/modelAdapter';
-import type { Inspection } from '@/types';
+import type { CleaningDecision, Inspection, WeatherSnapshot } from '@/types';
 import { ErrorBanner, FaultBadge, ConfidenceBar } from './StatusBadges';
 
 type CapturePhase = 'idle' | 'preview' | 'processing' | 'success' | 'error';
@@ -241,7 +241,7 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
             </div>
           </div>
           <p className="mt-6 text-sm font-medium text-ink-700">Running AI inspection</p>
-          <p className="mt-1.5 text-xs text-ink-400">Sending image to model and analyzing</p>
+          <p className="mt-1.5 text-xs text-ink-400">GPS weather check, model analysis, and cleaning decision</p>
         </div>
       )}
 
@@ -290,6 +290,8 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
             </div>
           )}
 
+          <InspectionContext result={result} />
+
           <button
             onClick={resetCapture}
             className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-ink-900 rounded-xl hover:bg-ink-800 transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -314,4 +316,49 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
       )}
     </div>
   );
+}
+
+function InspectionContext({ result }: { result: Inspection }) {
+  const weather = result.raw_output?.weather as WeatherSnapshot | undefined;
+  const cleaningDecision = result.raw_output?.cleaning_decision as CleaningDecision | undefined;
+
+  if (!weather && !cleaningDecision) return null;
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {weather && (
+        <div className="bg-white border border-ink-200/60 rounded-xl p-4">
+          <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5">
+            <CloudSun size={13} /> Weather
+          </p>
+          {weather.error ? (
+            <p className="text-sm text-amber-700">{weather.error}</p>
+          ) : (
+            <p className="text-sm text-ink-700">
+              {formatWeatherValue(weather.temperature_c, 'C')} | rain {formatWeatherValue(weather.forecast_24h_precipitation_mm, 'mm')}
+            </p>
+          )}
+          {!weather.error && (
+            <p className="text-xs text-ink-400 mt-1">
+              GPS {weather.latitude.toFixed(4)}, {weather.longitude.toFixed(4)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {cleaningDecision && (
+        <div className="bg-white border border-ink-200/60 rounded-xl p-4">
+          <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5">
+            <Droplets size={13} /> Cleaning Decision
+          </p>
+          <p className="text-sm font-medium text-ink-800">{cleaningDecision.label}</p>
+          <p className="text-xs text-ink-500 mt-1">{cleaningDecision.reason}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatWeatherValue(value: number | null | undefined, unit: string): string {
+  return value == null ? 'N/A' : `${value}${unit}`;
 }

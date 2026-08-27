@@ -1,4 +1,4 @@
-import type { ModelPrediction } from '@/types';
+import type { ModelPrediction, WeatherSnapshot } from '@/types';
 
 /**
  * Model Adapter Interface
@@ -29,7 +29,7 @@ const MODEL_NOT_CONNECTED_ERROR = 'Model inference service is not connected. Set
  * @param imageBlob - The captured/uploaded image as a Blob.
  * @returns ModelPrediction with class, confidence, and is_fault flag.
  */
-export async function runInference(imageBlob: Blob): Promise<ModelPrediction> {
+export async function runInference(imageBlob: Blob, weather?: WeatherSnapshot | null): Promise<ModelPrediction> {
   const inferenceUrl = import.meta.env.VITE_MODEL_INFERENCE_URL;
 
   if (!inferenceUrl) {
@@ -38,6 +38,9 @@ export async function runInference(imageBlob: Blob): Promise<ModelPrediction> {
 
   const formData = new FormData();
   formData.append('image', imageBlob, 'solar-panel.jpg');
+  if (weather && !weather.error) {
+    formData.append('weather', JSON.stringify(weather));
+  }
 
   let response: Response;
   try {

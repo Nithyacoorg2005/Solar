@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import { runInference } from './modelAdapter';
+import { decideCleaning } from './cleaningDecision';
+import { getInspectionWeather } from './weatherApi';
 import type {
   Inspection,
   InspectionSchedule,
@@ -103,9 +105,11 @@ export async function getDashboardStats(panelId?: string): Promise<DashboardStat
 /**
  * Run the full inspection pipeline:
  * 1. Create inspection record (status: pending)
- * 2. Send image to model adapter
- * 3. Update record with prediction (status: completed)
- * 4. If fault detected, mark notification as needed
+ * 2. Capture browser GPS and Open-Meteo weather context
+ * 3. Send image and weather context to model adapter
+ * 4. Combine the AI result with weather into a cleaning decision
+ * 5. Update record with prediction (status: completed)
+ * 6. If fault detected, mark notification as needed
  *
  * Returns the completed inspection record.
  */
@@ -128,21 +132,29 @@ export async function runInspection(
   // Step 3: Mark as processing
   await updateInspection(inspection.id, { processing_status: 'processing' });
 
-  // Step 4: Run model inference
+  // Step 4: Capture weather context before AI inference
+  const weather = await getInspectionWeather();
+
+  // Step 5: Run model inference
   let prediction: ModelPrediction;
   try {
-    prediction = await runInference(imageBlob);
+    prediction = await runInference(imageBlob, weather);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Unknown inference error';
     const updated = await updateInspection(inspection.id, {
       processing_status: 'failed',
       error_message: errorMsg,
       notification_status: 'not_required',
+      raw_output: {
+        weather,
+      },
     });
     return updated;
   }
 
-  // Step 5: Update record with prediction
+  const cleaningDecision = decideCleaning(prediction, weather);
+
+  // Step 6: Update record with prediction
   const updated = await updateInspection(inspection.id, {
     prediction: prediction.class,
     confidence: prediction.confidence,
@@ -150,7 +162,12 @@ export async function runInspection(
     processing_status: 'completed',
     error_message: null,
     notification_status: prediction.is_fault ? 'sent' : 'not_required',
-    raw_output: prediction as unknown as Record<string, unknown>,
+    raw_output: {
+      model: prediction,
+      weather,
+      cleaning_decision: cleaningDecision,
+      ...prediction,
+    } as Record<string, unknown>,
   });
 
   return updated;

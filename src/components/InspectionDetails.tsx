@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle, CloudSun, Droplets, Wind } from 'lucide-react';
 import { getInspectionById, formatDateTime, formatDate, formatTime } from '@/lib/inspectionApi';
-import type { Inspection } from '@/types';
+import type { CleaningDecision, Inspection, WeatherSnapshot } from '@/types';
 import { FaultBadge, StatusBadge, NotificationBadge, ConfidenceBar, Spinner } from './StatusBadges';
 
 interface InspectionDetailsProps {
@@ -55,6 +55,8 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
   }
 
   const rawClasses = inspection.raw_output?.all_classes as { class: string; confidence: number }[] | undefined;
+  const weather = inspection.raw_output?.weather as WeatherSnapshot | undefined;
+  const cleaningDecision = inspection.raw_output?.cleaning_decision as CleaningDecision | undefined;
 
   return (
     <div className="space-y-8 max-w-3xl mx-auto animate-fade-in">
@@ -118,6 +120,62 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
         </div>
       )}
 
+      {(weather || cleaningDecision) && (
+        <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
+          <div className="px-6 py-4 border-b border-ink-100">
+            <h3 className="text-sm font-semibold text-ink-700">Weather and Cleaning Decision</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-ink-200/60">
+            {weather && (
+              <>
+                <DetailCell
+                  icon={<CloudSun size={14} />}
+                  label="GPS Location"
+                  value={
+                    weather.error
+                      ? weather.error
+                      : `${weather.latitude.toFixed(4)}, ${weather.longitude.toFixed(4)}`
+                  }
+                />
+                <DetailCell
+                  icon={<CloudSun size={14} />}
+                  label="Current Weather"
+                  value={
+                    weather.error
+                      ? weather.error
+                      : `${formatWeatherValue(weather.temperature_c, 'C')} | humidity ${formatWeatherValue(weather.humidity_pct, '%')}`
+                  }
+                />
+                <DetailCell
+                  icon={<Wind size={14} />}
+                  label="Wind / Clouds"
+                  value={`${formatWeatherValue(weather.wind_speed_kmh, ' km/h')} | clouds ${formatWeatherValue(weather.cloud_cover_pct, '%')}`}
+                />
+                <DetailCell
+                  icon={<Droplets size={14} />}
+                  label="Rain Now"
+                  value={`${formatWeatherValue(weather.precipitation_mm, ' mm')} current precipitation`}
+                />
+                <DetailCell
+                  icon={<Droplets size={14} />}
+                  label="Next 24 Hours"
+                  value={`${formatWeatherValue(weather.forecast_24h_precipitation_mm, ' mm')} rain | ${formatWeatherValue(weather.forecast_24h_precipitation_probability_max_pct, '%')} max chance`}
+                />
+              </>
+            )}
+            {cleaningDecision && (
+              <div className="bg-white px-6 py-5 sm:col-span-2">
+                <p className="text-xs text-ink-400 mb-1 flex items-center gap-1.5">
+                  <Droplets size={14} /> Cleaning Decision
+                </p>
+                <p className="text-sm font-semibold text-ink-800">{cleaningDecision.label}</p>
+                <p className="text-sm text-ink-600 mt-1">{cleaningDecision.reason}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* All classes */}
       {rawClasses && rawClasses.length > 0 && (
         <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
@@ -157,4 +215,8 @@ function DetailCell({ icon, label, value }: { icon: React.ReactNode; label: stri
       <div className="text-sm text-ink-800">{value}</div>
     </div>
   );
+}
+
+function formatWeatherValue(value: number | null | undefined, unit: string): string {
+  return value == null ? 'N/A' : `${value}${unit}`;
 }

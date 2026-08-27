@@ -42,6 +42,35 @@ export interface ModelPrediction {
   all_classes?: { class: string; confidence: number }[];
 }
 
+export interface WeatherSnapshot {
+  latitude: number;
+  longitude: number;
+  source: 'open-meteo';
+  captured_at: string;
+  temperature_c: number | null;
+  humidity_pct: number | null;
+  precipitation_mm: number | null;
+  rain_mm: number | null;
+  showers_mm: number | null;
+  wind_speed_kmh: number | null;
+  wind_gusts_kmh: number | null;
+  weather_code: number | null;
+  cloud_cover_pct: number | null;
+  forecast_24h_precipitation_mm: number | null;
+  forecast_24h_precipitation_probability_max_pct: number | null;
+  error?: string;
+}
+
+export type CleaningDecisionAction = 'clean_now' | 'defer_for_rain' | 'monitor' | 'maintenance_review';
+
+export interface CleaningDecision {
+  action: CleaningDecisionAction;
+  label: string;
+  reason: string;
+  priority: 'low' | 'medium' | 'high';
+  should_clean: boolean;
+}
+
 export interface InspectionCreate {
   panel_id: string;
   image_path: string | null;
