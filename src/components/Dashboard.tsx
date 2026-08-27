@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Clock, ImageOff, Calendar, TrendingUp, CheckCircle2, AlertTriangle, Bell } from 'lucide-react';
+import { Clock, ImageOff, Calendar, TrendingUp, CheckCircle2, AlertTriangle, Bell, Droplets } from 'lucide-react';
 import { getDashboardStats, getInspectionHistory, formatDateTime } from '@/lib/inspectionApi';
 import { getNotificationPermission } from '@/lib/notificationService';
-import type { Inspection, DashboardStats } from '@/types';
+import type { CleaningDecision, Inspection, DashboardStats } from '@/types';
 import { FaultBadge, StatusBadge, ConfidenceBar, Spinner, EmptyState } from './StatusBadges';
 
 interface DashboardProps {
@@ -59,6 +59,7 @@ export function Dashboard({ panelId, onSelectInspection, refreshKey }: Dashboard
 
   const latest = stats?.latest;
   const isUnderInspection = latest?.processing_status === 'processing' || latest?.processing_status === 'pending';
+  const cleaningDecision = latest?.raw_output?.cleaning_decision as CleaningDecision | undefined;
 
   return (
     <div className="space-y-8">
@@ -160,6 +161,12 @@ export function Dashboard({ panelId, onSelectInspection, refreshKey }: Dashboard
               notifPerm === 'unsupported' ? 'N/A' : 'Off'
             }
             accent={notifPerm === 'granted' ? 'green' : 'neutral'}
+          />
+          <StatTile
+            icon={<Droplets size={16} />}
+            label="Cleaning"
+            value={cleaningDecision?.label ?? 'N/A'}
+            accent={cleaningDecision?.should_clean ? 'red' : 'neutral'}
           />
         </div>
       </div>
