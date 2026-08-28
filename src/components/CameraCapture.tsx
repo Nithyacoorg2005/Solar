@@ -40,6 +40,10 @@ import {
 } from './StatusBadges';
 
 
+// ============================================================
+// TYPES
+// ============================================================
+
 type CapturePhase =
   | 'idle'
   | 'preview'
@@ -48,603 +52,860 @@ type CapturePhase =
   | 'error';
 
 
+// ============================================================
+// PROPS
+// ============================================================
+
 interface CameraCaptureProps {
+
   panelId: string;
+
+  /*
+   * TRUE only when App.tsx has detected
+   * that the configured schedule has arrived.
+   *
+   * FALSE when the user simply opens
+   * the camera manually.
+   */
+  scheduledCapture: boolean;
+
   onInspectionComplete: (
     inspection: Inspection
   ) => void;
 }
 
 
+// ============================================================
+// COMPONENT
+// ============================================================
+
 export function CameraCapture({
+
   panelId,
+
+  scheduledCapture,
+
   onInspectionComplete,
+
 }: CameraCaptureProps) {
 
-  // ============================================================
+
+  // ==========================================================
   // STATE
-  // ============================================================
+  // ==========================================================
 
-  const [phase, setPhase] =
-    useState<CapturePhase>('idle');
+  const [
+    phase,
+    setPhase,
+  ] = useState<CapturePhase>('idle');
 
-  const [error, setError] =
-    useState<string | null>(null);
 
-  const [result, setResult] =
-    useState<Inspection | null>(null);
+  const [
+    error,
+    setError,
+  ] = useState<string | null>(null);
 
-  const [imageDataUrl, setImageDataUrl] =
-    useState<string | null>(null);
 
-  const [imageBlob, setImageBlob] =
-    useState<Blob | null>(null);
+  const [
+    result,
+    setResult,
+  ] = useState<Inspection | null>(null);
 
-  const [cameraActive, setCameraActive] =
-    useState(false);
 
-  const [cameraError, setCameraError] =
-    useState<string | null>(null);
+  const [
+    imageDataUrl,
+    setImageDataUrl,
+  ] = useState<string | null>(null);
 
-  const [facingMode, setFacingMode] =
-    useState<'environment' | 'user'>(
-      'environment'
-    );
 
-  const [autoCaptureEnabled, setAutoCaptureEnabled] =
-    useState(false);
+  const [
+    imageBlob,
+    setImageBlob,
+  ] = useState<Blob | null>(null);
 
-  const [captureStatus, setCaptureStatus] =
-    useState('Camera is ready.');
 
-  // ============================================================
+  const [
+    cameraActive,
+    setCameraActive,
+  ] = useState(false);
+
+
+  const [
+    cameraError,
+    setCameraError,
+  ] = useState<string | null>(null);
+
+
+  const [
+    facingMode,
+    setFacingMode,
+  ] = useState<'environment' | 'user'>(
+    'environment'
+  );
+
+
+  /*
+   * TRUE only while scheduled automatic
+   * capture is actually running.
+   */
+  const [
+    autoCaptureEnabled,
+    setAutoCaptureEnabled,
+  ] = useState(false);
+
+
+  const [
+    captureStatus,
+    setCaptureStatus,
+  ] = useState(
+    'Camera is ready.'
+  );
+
+
+  /*
+   * Number of automatic captures completed.
+   */
+  const [
+    automaticCaptureCount,
+    setAutomaticCaptureCount,
+  ] = useState(0);
+
+
+  // ==========================================================
   // REFS
-  // ============================================================
+  // ==========================================================
 
   const videoRef =
     useRef<HTMLVideoElement>(null);
 
+
   const streamRef =
     useRef<MediaStream | null>(null);
+
 
   const fileInputRef =
     useRef<HTMLInputElement>(null);
 
+
+  /*
+   * 5-second automatic capture timer.
+   */
   const autoCaptureTimerRef =
     useRef<ReturnType<typeof setInterval> | null>(
       null
     );
 
-  const firstCaptureTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(
-      null
-    );
 
   /*
-   * Prevent two AI inspections from running
-   * simultaneously.
+   * Prevent multiple AI inspections
+   * from running at the same time.
    */
   const processingRef =
     useRef(false);
+
+
+  /*
+   * Used to remember whether the first
+   * scheduled capture has already happened.
+   */
+  const firstScheduledCaptureDoneRef =
+    useRef(false);
+
 
   const modelConnected =
     isModelConnected();
 
 
-  // ============================================================
-  // STOP CAMERA
-  // ============================================================
+  // ==========================================================
+  // STOP AUTOMATIC CAPTURE TIMER
+  // ==========================================================
 
-  const stopCamera = useCallback(() => {
+  const stopAutoCaptureTimer =
+    useCallback(() => {
 
-    console.log('Stopping camera...');
-
-    // Stop automatic timer
-    if (autoCaptureTimerRef.current) {
-
-      clearInterval(
+      if (
         autoCaptureTimerRef.current
-      );
+      ) {
 
-      autoCaptureTimerRef.current = null;
-    }
-
-    // Stop first capture timer
-    if (firstCaptureTimerRef.current) {
-
-      clearTimeout(
-        firstCaptureTimerRef.current
-      );
-
-      firstCaptureTimerRef.current = null;
-    }
-
-    // Stop camera stream
-    if (streamRef.current) {
-
-      streamRef.current
-        .getTracks()
-        .forEach((track) => {
-          track.stop();
-        });
-
-      streamRef.current = null;
-    }
-
-    // Remove stream from video
-    if (videoRef.current) {
-
-      videoRef.current.srcObject =
-        null;
-    }
-
-    setCameraActive(false);
-
-    setAutoCaptureEnabled(false);
-
-    processingRef.current = false;
-
-    setCaptureStatus(
-      'Camera stopped.'
-    );
-
-  }, []);
-
-
-  // ============================================================
-  // START CAMERA
-  // ============================================================
-
-  const startCamera = useCallback(
-    async () => {
-
-      setCameraError(null);
-
-      setError(null);
-
-      setResult(null);
-
-      setImageDataUrl(null);
-
-      setImageBlob(null);
-
-      setPhase('idle');
-
-      setAutoCaptureEnabled(false);
-
-      setCaptureStatus(
-        'Connecting to DroidCam...'
-      );
-
-
-      try {
-
-        // ------------------------------------------------------
-        // Check browser support
-        // ------------------------------------------------------
-
-        if (
-          !navigator.mediaDevices ||
-          !navigator.mediaDevices.getUserMedia
-        ) {
-
-          throw new Error(
-            'Camera API is not supported by this browser.'
-          );
-        }
-
-
-        // ------------------------------------------------------
-        // Stop previous stream if any
-        // ------------------------------------------------------
-
-        if (streamRef.current) {
-
-          streamRef.current
-            .getTracks()
-            .forEach((track) => {
-              track.stop();
-            });
-
-          streamRef.current = null;
-        }
-
-
-        console.log(
-          'Requesting camera access...'
+        clearInterval(
+          autoCaptureTimerRef.current
         );
 
+        autoCaptureTimerRef.current =
+          null;
 
-        // ------------------------------------------------------
-        // Request camera
-        // ------------------------------------------------------
+      }
 
-        const stream =
-          await navigator.mediaDevices.getUserMedia(
-            {
-              video: {
-                width: {
-                  ideal: 1280,
-                },
+    }, []);
 
-                height: {
-                  ideal: 720,
-                },
 
-                facingMode: {
-                  ideal: facingMode,
-                },
-              },
+  // ==========================================================
+  // STOP CAMERA
+  // ==========================================================
 
-              audio: false,
+  const stopCamera =
+    useCallback(() => {
+
+      console.log(
+        '[Camera] Stopping camera...'
+      );
+
+
+      // --------------------------------------------------------
+      // Stop automatic capture
+      // --------------------------------------------------------
+
+      stopAutoCaptureTimer();
+
+
+      // --------------------------------------------------------
+      // Stop camera stream
+      // --------------------------------------------------------
+
+      if (
+        streamRef.current
+      ) {
+
+        streamRef.current
+          .getTracks()
+          .forEach(
+            (track) => {
+              track.stop();
             }
           );
 
 
-        console.log(
-          'Camera stream received:',
-          stream
+        streamRef.current =
+          null;
+
+      }
+
+
+      // --------------------------------------------------------
+      // Remove video stream
+      // --------------------------------------------------------
+
+      if (
+        videoRef.current
+      ) {
+
+        videoRef.current.srcObject =
+          null;
+
+      }
+
+
+      // --------------------------------------------------------
+      // Reset camera state
+      // --------------------------------------------------------
+
+      setCameraActive(
+        false
+      );
+
+
+      setAutoCaptureEnabled(
+        false
+      );
+
+
+      firstScheduledCaptureDoneRef.current =
+        false;
+
+
+      processingRef.current =
+        false;
+
+
+      setCaptureStatus(
+        'Camera stopped.'
+      );
+
+
+    }, [
+      stopAutoCaptureTimer,
+    ]);
+
+
+  // ==========================================================
+  // START CAMERA
+  // ==========================================================
+
+  const startCamera =
+    useCallback(
+      async () => {
+
+        setCameraError(
+          null
         );
 
 
-        // ------------------------------------------------------
-        // Save stream
-        // ------------------------------------------------------
-
-        streamRef.current =
-          stream;
+        setError(
+          null
+        );
 
 
-        // ------------------------------------------------------
-        // Camera active
-        // ------------------------------------------------------
-
-        setCameraActive(true);
+        setResult(
+          null
+        );
 
 
-        // ------------------------------------------------------
-        // Attach stream to video
-        //
-        // IMPORTANT:
-        // We attach it AFTER React has rendered
-        // the <video> element.
-        // ------------------------------------------------------
+        setImageDataUrl(
+          null
+        );
 
-        setTimeout(() => {
 
-          const video =
-            videoRef.current;
+        setImageBlob(
+          null
+        );
 
-          if (!video) {
 
-            console.error(
-              'Video element not found.'
+        setPhase(
+          'idle'
+        );
+
+
+        /*
+         * IMPORTANT:
+         *
+         * Starting the camera does NOT
+         * start automatic capture.
+         *
+         * Automatic capture is controlled
+         * separately by scheduledCapture.
+         */
+
+        setAutoCaptureEnabled(
+          false
+        );
+
+
+        firstScheduledCaptureDoneRef.current =
+          false;
+
+
+        setCaptureStatus(
+          scheduledCapture
+            ? 'Scheduled inspection: connecting to DroidCam...'
+            : 'Connecting to DroidCam...'
+        );
+
+
+        try {
+
+          // ----------------------------------------------------
+          // Browser support
+          // ----------------------------------------------------
+
+          if (
+            !navigator.mediaDevices ||
+            !navigator.mediaDevices.getUserMedia
+          ) {
+
+            throw new Error(
+              'Camera API is not supported by this browser.'
             );
 
-            setCameraError(
-              'Video element could not be initialized.'
-            );
+          }
 
-            return;
+
+          // ----------------------------------------------------
+          // Stop old stream
+          // ----------------------------------------------------
+
+          if (
+            streamRef.current
+          ) {
+
+            streamRef.current
+              .getTracks()
+              .forEach(
+                (track) => {
+                  track.stop();
+                }
+              );
+
+
+            streamRef.current =
+              null;
+
           }
 
 
           console.log(
-            'Attaching camera stream to video...'
+            '[Camera] Requesting camera access...'
           );
 
 
-          video.srcObject =
+          // ----------------------------------------------------
+          // Request camera
+          // ----------------------------------------------------
+
+          const stream =
+            await navigator.mediaDevices.getUserMedia(
+              {
+                video: {
+
+                  width: {
+                    ideal: 1280,
+                  },
+
+                  height: {
+                    ideal: 720,
+                  },
+
+                  facingMode: {
+                    ideal: facingMode,
+                  },
+
+                },
+
+                audio: false,
+
+              }
+            );
+
+
+          console.log(
+            '[Camera] Camera stream received:',
+            stream
+          );
+
+
+          // ----------------------------------------------------
+          // Store stream
+          // ----------------------------------------------------
+
+          streamRef.current =
             stream;
 
 
-          video.onloadedmetadata =
-            async () => {
+          // ----------------------------------------------------
+          // Camera active
+          // ----------------------------------------------------
+
+          setCameraActive(
+            true
+          );
+
+
+          // ----------------------------------------------------
+          // Attach stream after render
+          // ----------------------------------------------------
+
+          setTimeout(
+            () => {
+
+              const video =
+                videoRef.current;
+
+
+              if (!video) {
+
+                console.error(
+                  '[Camera] Video element not found.'
+                );
+
+
+                setCameraError(
+                  'Video element could not be initialized.'
+                );
+
+
+                return;
+
+              }
+
 
               console.log(
-                'Video metadata loaded.'
+                '[Camera] Attaching stream...'
               );
 
-              try {
 
-                await video.play();
-
-                console.log(
-                  'Video is playing:',
-                  video.videoWidth,
-                  'x',
-                  video.videoHeight
-                );
+              video.srcObject =
+                stream;
 
 
-                setCaptureStatus(
-                  'DroidCam connected. Preparing automatic capture...'
-                );
+              video.onloadedmetadata =
+                async () => {
+
+                  try {
+
+                    await video.play();
 
 
-                /*
-                 * Give camera 3 seconds to stabilize.
-                 */
-                firstCaptureTimerRef.current =
-                  setTimeout(() => {
+                    console.log(
+                      '[Camera] Video playing:',
+                      video.videoWidth,
+                      'x',
+                      video.videoHeight
+                    );
+
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * We DO NOT start a timer here.
+                     *
+                     * Previously the code waited 3 seconds
+                     * and enabled automatic capture here.
+                     *
+                     * That caused the camera to capture
+                     * immediately after opening.
+                     *
+                     * Now we only show the live video.
+                     */
 
                     if (
-                      streamRef.current &&
-                      video.readyState >= 2
+                      scheduledCapture
                     ) {
 
-                      setAutoCaptureEnabled(
-                        true
+                      setCaptureStatus(
+                        'Camera ready. Starting scheduled capture...'
                       );
 
+                    } else {
+
                       setCaptureStatus(
-                        'Automatic capture is ON.'
+                        'DroidCam connected. Live video is ready.'
                       );
 
                     }
 
-                  }, 3000);
+                  } catch (
+                    playError
+                  ) {
 
-              } catch (playError) {
-
-                console.error(
-                  'Video play error:',
-                  playError
-                );
-
-                setCameraError(
-                  'Camera connected, but the video could not start.'
-                );
-              }
-            };
-
-        }, 100);
+                    console.error(
+                      '[Camera] Video play error:',
+                      playError
+                    );
 
 
-      } catch (err) {
+                    setCameraError(
+                      'Camera connected, but the video could not start.'
+                    );
 
-        console.error(
-          'Camera error:',
+                  }
+
+                };
+
+
+            },
+            100
+          );
+
+
+        } catch (
           err
-        );
-
-
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Unable to access camera.';
-
-
-        if (
-          message.includes(
-            'NotAllowed'
-          ) ||
-          message.includes(
-            'Permission'
-          ) ||
-          message.includes(
-            'denied'
-          )
         ) {
 
-          setCameraError(
-            'Camera permission was denied. Allow camera access in the browser and try again.'
+          console.error(
+            '[Camera] Camera error:',
+            err
           );
 
-        } else if (
-          message.includes(
-            'NotFound'
-          ) ||
-          message.includes(
-            'DevicesNotFound'
-          )
-        ) {
 
-          setCameraError(
-            'No camera was found. Make sure DroidCam Client is connected and showing your phone camera.'
+          const message =
+            err instanceof Error
+              ? err.message
+              : 'Unable to access camera.';
+
+
+          if (
+            message.includes(
+              'NotAllowed'
+            ) ||
+            message.includes(
+              'Permission'
+            ) ||
+            message.includes(
+              'denied'
+            )
+          ) {
+
+            setCameraError(
+              'Camera permission was denied. Allow camera access in the browser and try again.'
+            );
+
+
+          } else if (
+            message.includes(
+              'NotFound'
+            ) ||
+            message.includes(
+              'DevicesNotFound'
+            )
+          ) {
+
+            setCameraError(
+              'No camera was found. Make sure DroidCam Client is connected and showing your phone camera.'
+            );
+
+
+          } else {
+
+            setCameraError(
+              `Camera unavailable: ${message}`
+            );
+
+          }
+
+
+          setCameraActive(
+            false
           );
 
-        } else {
-
-          setCameraError(
-            `Camera unavailable: ${message}`
-          );
         }
 
-        setCameraActive(false);
+      },
+      [
+        facingMode,
+        scheduledCapture,
+      ]
+    );
 
-      }
 
-    },
-    [facingMode]
-  );
-
-
-  // ============================================================
+  // ==========================================================
   // CAPTURE IMAGE FROM CAMERA
-  // ============================================================
+  // ==========================================================
 
   const captureFromCamera =
-    useCallback(async () => {
+    useCallback(
+      async () => {
 
-      const video =
-        videoRef.current;
+        const video =
+          videoRef.current;
 
-
-      if (!video) {
-
-        console.log(
-          'Video element does not exist.'
-        );
-
-        return;
-      }
-
-
-      if (!streamRef.current) {
-
-        console.log(
-          'No active camera stream.'
-        );
-
-        return;
-      }
-
-
-      /*
-       * Don't start another inspection
-       * while current one is processing.
-       */
-
-      if (processingRef.current) {
-
-        console.log(
-          'Inspection already running. Skipping capture.'
-        );
-
-        return;
-      }
-
-
-      /*
-       * Video must contain real frames.
-       */
-
-      if (video.readyState < 2) {
-
-        console.log(
-          'Video is not ready.'
-        );
-
-        return;
-      }
-
-
-      if (
-        video.videoWidth === 0 ||
-        video.videoHeight === 0
-      ) {
-
-        console.log(
-          'Video has no dimensions.'
-        );
-
-        return;
-      }
-
-
-      console.log(
-        'Capturing frame:',
-        video.videoWidth,
-        'x',
-        video.videoHeight
-      );
-
-
-      processingRef.current =
-        true;
-
-
-      try {
 
         // ------------------------------------------------------
-        // Create canvas
+        // Video element check
         // ------------------------------------------------------
 
-        const canvas =
-          document.createElement(
-            'canvas'
+        if (!video) {
+
+          console.log(
+            '[Capture] Video element does not exist.'
           );
 
-
-        canvas.width =
-          video.videoWidth;
-
-        canvas.height =
-          video.videoHeight;
-
-
-        const context =
-          canvas.getContext('2d');
-
-
-        if (!context) {
-
-          processingRef.current =
-            false;
-
           return;
+
         }
 
 
         // ------------------------------------------------------
-        // Draw video frame
+        // Stream check
         // ------------------------------------------------------
 
-        context.drawImage(
-          video,
-          0,
-          0,
-          canvas.width,
-          canvas.height
+        if (
+          !streamRef.current
+        ) {
+
+          console.log(
+            '[Capture] No active camera stream.'
+          );
+
+          return;
+
+        }
+
+
+        // ------------------------------------------------------
+        // Prevent overlapping inspection
+        // ------------------------------------------------------
+
+        if (
+          processingRef.current
+        ) {
+
+          console.log(
+            '[Capture] Inspection already running. Skipping capture.'
+          );
+
+          return;
+
+        }
+
+
+        // ------------------------------------------------------
+        // Video readiness
+        // ------------------------------------------------------
+
+        if (
+          video.readyState < 2
+        ) {
+
+          console.log(
+            '[Capture] Video is not ready.'
+          );
+
+          return;
+
+        }
+
+
+        // ------------------------------------------------------
+        // Video dimensions
+        // ------------------------------------------------------
+
+        if (
+          video.videoWidth === 0 ||
+          video.videoHeight === 0
+        ) {
+
+          console.log(
+            '[Capture] Video has no dimensions.'
+          );
+
+          return;
+
+        }
+
+
+        console.log(
+          '[Capture] Capturing frame:',
+          video.videoWidth,
+          'x',
+          video.videoHeight
         );
 
 
-        // ------------------------------------------------------
-        // Convert to JPEG
-        // ------------------------------------------------------
-
-        canvas.toBlob(
-          async (blob) => {
-
-            if (!blob) {
-
-              console.error(
-                'Could not create image blob.'
-              );
-
-              processingRef.current =
-                false;
-
-              return;
-            }
+        processingRef.current =
+          true;
 
 
-            console.log(
-              'PHOTO CAPTURED SUCCESSFULLY'
+        try {
+
+          // ----------------------------------------------------
+          // Canvas
+          // ----------------------------------------------------
+
+          const canvas =
+            document.createElement(
+              'canvas'
             );
 
 
-            // Save blob
-            setImageBlob(blob);
+          canvas.width =
+            video.videoWidth;
 
 
-            // Show captured image
-            const dataUrl =
-              canvas.toDataURL(
-                'image/jpeg',
-                0.85
-              );
+          canvas.height =
+            video.videoHeight;
 
-            setImageDataUrl(
-              dataUrl
+
+          const context =
+            canvas.getContext(
+              '2d'
             );
 
 
-            // --------------------------------------------------
-            // Run EXISTING AI pipeline
-            // --------------------------------------------------
+          if (!context) {
+
+            processingRef.current =
+              false;
+
+            return;
+
+          }
+
+
+          // ----------------------------------------------------
+          // Draw video frame
+          // ----------------------------------------------------
+
+          context.drawImage(
+            video,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+
+          // ----------------------------------------------------
+          // Convert to JPEG
+          // ----------------------------------------------------
+
+          const blob =
+            await new Promise<Blob | null>(
+              (resolve) => {
+
+                canvas.toBlob(
+                  (createdBlob) => {
+
+                    resolve(
+                      createdBlob
+                    );
+
+                  },
+                  'image/jpeg',
+                  0.85
+                );
+
+              }
+            );
+
+
+          if (!blob) {
+
+            throw new Error(
+              'Could not create image blob.'
+            );
+
+          }
+
+
+          console.log(
+            '[Capture] PHOTO CAPTURED SUCCESSFULLY'
+          );
+
+
+          // ----------------------------------------------------
+          // Save image
+          // ----------------------------------------------------
+
+          setImageBlob(
+            blob
+          );
+
+
+          const dataUrl =
+            canvas.toDataURL(
+              'image/jpeg',
+              0.85
+            );
+
+
+          setImageDataUrl(
+            dataUrl
+          );
+
+
+          // ----------------------------------------------------
+          // Update status
+          // ----------------------------------------------------
+
+          setCaptureStatus(
+            scheduledCapture
+              ? 'Photo captured. Running AI inspection...'
+              : 'Photo captured. Ready for inspection.'
+          );
+
+
+          // ----------------------------------------------------
+          // Scheduled capture
+          //
+          // Automatically run AI inspection.
+          // ----------------------------------------------------
+
+          if (
+            scheduledCapture
+          ) {
 
             setPhase(
               'processing'
             );
-
-            setCaptureStatus(
-              'Photo captured. Running AI inspection...'
-            );
-
-
-            setError(null);
 
 
             try {
@@ -652,21 +913,11 @@ export function CameraCapture({
               await ensureNotificationPermission();
 
 
-              /*
-               * IMPORTANT:
-               *
-               * This is your existing backend
-               * inspection function.
-               *
-               * MobileNetV3 + Grad-CAM remains
-               * in your existing ML service.
-               */
-
               const inspection =
                 await runInspection(
                   panelId,
                   blob,
-                  'manual'
+                  'scheduled'
                 );
 
 
@@ -683,23 +934,32 @@ export function CameraCapture({
                 await sendFaultNotification(
                   inspection
                 );
+
               }
 
 
               // ------------------------------------------------
-              // Display result
+              // Result
               // ------------------------------------------------
 
               setResult(
                 inspection
               );
 
+
               setPhase(
                 'success'
               );
 
+
+              setAutomaticCaptureCount(
+                (count) =>
+                  count + 1
+              );
+
+
               setCaptureStatus(
-                'Inspection completed.'
+                'Scheduled inspection completed. Next capture in 5 seconds.'
               );
 
 
@@ -708,18 +968,20 @@ export function CameraCapture({
               );
 
 
-            } catch (inspectionError) {
+            } catch (
+              err
+            ) {
 
               console.error(
-                'Inspection error:',
-                inspectionError
+                '[Capture] Scheduled inspection failed:',
+                err
               );
 
 
               setError(
-                inspectionError instanceof Error
-                  ? inspectionError.message
-                  : 'Inspection failed unexpectedly.'
+                err instanceof Error
+                  ? err.message
+                  : 'Scheduled inspection failed.'
               );
 
 
@@ -729,288 +991,399 @@ export function CameraCapture({
 
 
               setCaptureStatus(
-                'Inspection failed.'
+                'Scheduled inspection failed. Automatic capture will continue.'
               );
 
-            } finally {
+            }
 
-              processingRef.current =
-                false;
+          } else {
+
+            // --------------------------------------------------
+            // Manual capture
+            //
+            // Do NOT automatically inspect.
+            // User can click Run Inspection.
+            // --------------------------------------------------
+
+            setPhase(
+              'preview'
+            );
+
+
+            setCaptureStatus(
+              'Photo captured. Click Run Inspection to analyze it.'
+            );
+
+          }
+
+
+        } catch (
+          err
+        ) {
+
+          console.error(
+            '[Capture] Capture failed:',
+            err
+          );
+
+
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to capture image.'
+          );
+
+
+          setPhase(
+            'error'
+          );
+
+        } finally {
+
+          processingRef.current =
+            false;
+
+        }
+
+      },
+      [
+        panelId,
+        scheduledCapture,
+        onInspectionComplete,
+      ]
+    );
+
+
+  // ==========================================================
+  // START / STOP SCHEDULED CAPTURE
+  // ==========================================================
+
+  useEffect(
+    () => {
+
+      /*
+       * Always clear an old timer first.
+       */
+
+      stopAutoCaptureTimer();
+
+
+      /*
+       * Reset automatic capture state.
+       */
+
+      setAutoCaptureEnabled(
+        false
+      );
+
+
+      /*
+       * If schedule is NOT active,
+       * do nothing.
+       */
+
+      if (
+        !scheduledCapture
+      ) {
+
+        firstScheduledCaptureDoneRef.current =
+          false;
+
+        return;
+
+      }
+
+
+      /*
+       * Schedule is active but camera
+       * is not ready yet.
+       *
+       * startCamera() will be triggered
+       * below.
+       */
+
+      if (
+        !cameraActive
+      ) {
+
+        setCaptureStatus(
+          'Scheduled inspection is waiting for camera...'
+        );
+
+        startCamera();
+
+        return;
+
+      }
+
+
+      /*
+       * Camera is ready.
+       *
+       * Start automatic capture.
+       */
+
+      console.log(
+        '[Scheduled Capture] Camera is ready.'
+      );
+
+
+      setAutoCaptureEnabled(
+        true
+      );
+
+
+      setCaptureStatus(
+        'Scheduled capture is active. Capturing first image...'
+      );
+
+
+      /*
+       * First capture immediately after
+       * the camera becomes ready.
+       *
+       * No arbitrary 3-second timer.
+       */
+
+      if (
+        !firstScheduledCaptureDoneRef.current
+      ) {
+
+        firstScheduledCaptureDoneRef.current =
+          true;
+
+
+        /*
+         * Give the browser one frame to
+         * ensure the video is rendering.
+         */
+
+        const firstCaptureTimer =
+          window.setTimeout(
+            () => {
+
+              if (
+                streamRef.current
+              ) {
+
+                captureFromCamera();
+
+              }
+
+            },
+            500
+          );
+
+
+        /*
+         * After the first capture, the
+         * interval below handles subsequent
+         * captures every 5 seconds.
+         */
+
+        autoCaptureTimerRef.current =
+          window.setInterval(
+            () => {
+
+              if (
+                streamRef.current &&
+                !processingRef.current
+              ) {
+
+                captureFromCamera();
+
+              }
+
+            },
+            5_000
+          );
+
+
+        return () => {
+
+          window.clearTimeout(
+            firstCaptureTimer
+          );
+
+          stopAutoCaptureTimer();
+
+        };
+
+      }
+
+
+      /*
+       * Safety fallback.
+       */
+
+      autoCaptureTimerRef.current =
+        window.setInterval(
+          () => {
+
+            if (
+              streamRef.current &&
+              !processingRef.current
+            ) {
+
+              captureFromCamera();
+
             }
 
           },
-          'image/jpeg',
-          0.85
+          5_000
         );
 
 
-      } catch (captureError) {
+      return () => {
 
-        console.error(
-          'Capture error:',
-          captureError
-        );
+        stopAutoCaptureTimer();
 
-        processingRef.current =
-          false;
-      }
+      };
 
-    }, [
-      panelId,
-      onInspectionComplete,
-    ]);
-
-
-  // ============================================================
-  // AUTOMATIC CAPTURE
-  // ============================================================
-
-  useEffect(() => {
-
-    if (
-      !cameraActive ||
-      !autoCaptureEnabled
-    ) {
-
-      return;
-    }
+    },
+    [
+      scheduledCapture,
+      cameraActive,
+      startCamera,
+      captureFromCamera,
+      stopAutoCaptureTimer,
+    ]
+  );
 
 
-    console.log(
-      'Automatic capture started.'
-    );
+  // ==========================================================
+  // CLEANUP
+  // ==========================================================
 
+  useEffect(
+    () => {
 
-    /*
-     * Capture immediately once camera
-     * has stabilized.
-     */
+      return () => {
 
-    const immediateTimer =
-      setTimeout(() => {
+        stopAutoCaptureTimer();
+
 
         if (
-          streamRef.current &&
-          videoRef.current &&
-          videoRef.current.readyState >= 2 &&
-          !processingRef.current
+          streamRef.current
         ) {
 
-          console.log(
-            'Taking automatic photo...'
-          );
+          streamRef.current
+            .getTracks()
+            .forEach(
+              (track) => {
+                track.stop();
+              }
+            );
 
-          captureFromCamera();
+          streamRef.current =
+            null;
+
         }
 
-      }, 1000);
+      };
+
+    },
+    [
+      stopAutoCaptureTimer,
+    ]
+  );
 
 
-    /*
-     * Continue every 5 seconds.
-     */
+  // ==========================================================
+  // SWITCH CAMERA
+  // ==========================================================
 
-    autoCaptureTimerRef.current =
-      setInterval(() => {
+  const switchCamera =
+    useCallback(
+      () => {
+
+        /*
+         * Stop current stream.
+         */
 
         if (
-          streamRef.current &&
-          videoRef.current &&
-          videoRef.current.readyState >= 2 &&
-          !processingRef.current
+          streamRef.current
         ) {
 
-          console.log(
-            'Taking automatic photo...'
-          );
+          streamRef.current
+            .getTracks()
+            .forEach(
+              (track) => {
+                track.stop();
+              }
+            );
 
-          captureFromCamera();
+          streamRef.current =
+            null;
 
-        } else {
-
-          console.log(
-            'Skipping capture because camera is not ready or AI is processing.'
-          );
         }
 
-      }, 5000);
 
-
-    /*
-     * Cleanup timer.
-     */
-
-    return () => {
-
-      clearTimeout(
-        immediateTimer
-      );
-
-
-      if (
-        autoCaptureTimerRef.current
-      ) {
-
-        clearInterval(
-          autoCaptureTimerRef.current
+        setCameraActive(
+          false
         );
 
-        autoCaptureTimerRef.current =
-          null;
-      }
 
-    };
+        setFacingMode(
+          (mode) =>
+            mode === 'environment'
+              ? 'user'
+              : 'environment'
+        );
 
-  }, [
-    cameraActive,
-    autoCaptureEnabled,
-    captureFromCamera,
-  ]);
-
-
-  // ============================================================
-  // CLEANUP WHEN COMPONENT UNMOUNTS
-  // ============================================================
-
-  useEffect(() => {
-
-    return () => {
-
-      stopCamera();
-
-    };
-
-  }, [stopCamera]);
-
-
-  // ============================================================
-  // FILE UPLOAD
-  // ============================================================
-
-  const handleFileUpload = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-
-    const file =
-      e.target.files?.[0];
-
-
-    if (!file) {
-      return;
-    }
-
-
-    if (
-      !file.type.startsWith(
-        'image/'
-      )
-    ) {
-
-      setError(
-        'Please select an image file.'
-      );
-
-      return;
-    }
-
-
-    const reader =
-      new FileReader();
-
-
-    reader.onload = () => {
-
-      setImageDataUrl(
-        reader.result as string
-      );
-
-      setImageBlob(
-        file
-      );
-
-      setPhase(
-        'preview'
-      );
-
-      setError(null);
-    };
-
-
-    reader.onerror = () => {
-
-      setError(
-        'Failed to read the selected image.'
-      );
-    };
-
-
-    reader.readAsDataURL(
-      file
-    );
-  };
-
-
-  // ============================================================
-  // RESET
-  // ============================================================
-
-  const resetCapture = () => {
-
-    stopCamera();
-
-    setImageDataUrl(
-      null
+      },
+      []
     );
 
-    setImageBlob(
-      null
-    );
 
-    setResult(
-      null
-    );
-
-    setError(
-      null
-    );
-
-    setCameraError(
-      null
-    );
-
-    setPhase(
-      'idle'
-    );
-
-    setCaptureStatus(
-      'Camera is ready.'
-    );
-  };
-
-
-  // ============================================================
-  // MANUAL INSPECTION FOR UPLOADED IMAGE
-  // ============================================================
+  // ==========================================================
+  // MANUAL INSPECTION
+  // ==========================================================
 
   const runInspectionPipeline =
     async () => {
 
-      if (!imageBlob) {
+      if (
+        !imageBlob
+      ) {
+
         return;
+
       }
+
+
+      /*
+       * Don't manually run while
+       * scheduled inspection is processing.
+       */
+
+      if (
+        processingRef.current
+      ) {
+
+        return;
+
+      }
+
+
+      processingRef.current =
+        true;
 
 
       setPhase(
         'processing'
       );
 
-      setError(null);
 
-
-      await ensureNotificationPermission();
+      setError(
+        null
+      );
 
 
       try {
+
+        await ensureNotificationPermission();
+
 
         const inspection =
           await runInspection(
@@ -1029,6 +1402,7 @@ export function CameraCapture({
           await sendFaultNotification(
             inspection
           );
+
         }
 
 
@@ -1036,8 +1410,14 @@ export function CameraCapture({
           inspection
         );
 
+
         setPhase(
           'success'
+        );
+
+
+        setCaptureStatus(
+          'Inspection completed.'
         );
 
 
@@ -1046,7 +1426,15 @@ export function CameraCapture({
         );
 
 
-      } catch (err) {
+      } catch (
+        err
+      ) {
+
+        console.error(
+          '[Manual Inspection] Failed:',
+          err
+        );
+
 
         setError(
           err instanceof Error
@@ -1054,19 +1442,188 @@ export function CameraCapture({
             : 'Inspection failed unexpectedly.'
         );
 
+
         setPhase(
           'error'
         );
+
+      } finally {
+
+        processingRef.current =
+          false;
+
       }
+
     };
 
 
-  // ============================================================
+  // ==========================================================
+  // FILE UPLOAD
+  // ==========================================================
+
+  const handleFileUpload =
+    (
+      event:
+        React.ChangeEvent<HTMLInputElement>
+    ) => {
+
+      const file =
+        event.target.files?.[0];
+
+
+      if (!file) {
+
+        return;
+
+      }
+
+
+      if (
+        !file.type.startsWith(
+          'image/'
+        )
+      ) {
+
+        setError(
+          'Please select an image file.'
+        );
+
+        return;
+
+      }
+
+
+      /*
+       * Stop camera if running.
+       */
+
+      stopCamera();
+
+
+      const reader =
+        new FileReader();
+
+
+      reader.onload = () => {
+
+        setImageDataUrl(
+          reader.result as string
+        );
+
+
+        setImageBlob(
+          file
+        );
+
+
+        setPhase(
+          'preview'
+        );
+
+
+        setError(
+          null
+        );
+
+
+        setCaptureStatus(
+          'Image uploaded. Click Run Inspection to analyze it.'
+        );
+
+      };
+
+
+      reader.onerror = () => {
+
+        setError(
+          'Failed to read the selected image.'
+        );
+
+      };
+
+
+      reader.readAsDataURL(
+        file
+      );
+
+    };
+
+
+  // ==========================================================
+  // RESET
+  // ==========================================================
+
+  const resetCapture =
+    () => {
+
+      stopCamera();
+
+
+      setImageDataUrl(
+        null
+      );
+
+
+      setImageBlob(
+        null
+      );
+
+
+      setResult(
+        null
+      );
+
+
+      setError(
+        null
+      );
+
+
+      setCameraError(
+        null
+      );
+
+
+      setPhase(
+        'idle'
+      );
+
+
+      setAutomaticCaptureCount(
+        0
+      );
+
+
+      setCaptureStatus(
+        'Camera is ready.'
+      );
+
+
+      /*
+       * Clear file input so the same
+       * image can be selected again.
+       */
+
+      if (
+        fileInputRef.current
+      ) {
+
+        fileInputRef.current.value =
+          '';
+
+      }
+
+    };
+
+
+  // ==========================================================
   // UI
-  // ============================================================
+  // ==========================================================
 
   return (
+
     <div className="max-w-2xl mx-auto">
+
 
       {/* ======================================================
           MODEL WARNING
@@ -1078,23 +1635,79 @@ export function CameraCapture({
           <div className="mb-6 px-5 py-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 animate-fade-in">
 
             <strong className="font-semibold">
+
               Model not connected.
+
             </strong>
 
-            {' '}The AI inference service URL is not configured.
+            {' '}
 
-            You can still capture and
-            store images, but predictions
-            will be marked as failed until
+            The AI inference service URL is not configured.
+
+            {' '}
+
+            You can still capture and store images,
+            but predictions will be marked as failed
+            until
 
             <code className="mx-1 px-1.5 py-0.5 bg-amber-100 rounded font-mono text-xs">
+
               VITE_MODEL_INFERENCE_URL
+
             </code>
 
             is set in the environment.
 
           </div>
+
         )}
+
+
+      {/* ======================================================
+          SCHEDULE STATUS
+          ====================================================== */}
+
+      {scheduledCapture && (
+
+        <div className="mb-6 px-5 py-4 bg-green-50 border border-green-200 rounded-xl text-sm text-green-800">
+
+          <div className="flex items-center gap-2">
+
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+
+            <strong>
+
+              Scheduled inspection active
+
+            </strong>
+
+          </div>
+
+
+          <p className="mt-1 ml-4 text-xs">
+
+            The system will capture an image every
+            5 seconds while the scheduled inspection
+            is active.
+
+          </p>
+
+
+          {automaticCaptureCount > 0 && (
+
+            <p className="mt-1 ml-4 text-xs">
+
+              Captures completed:
+              {' '}
+              {automaticCaptureCount}
+
+            </p>
+
+          )}
+
+        </div>
+
+      )}
 
 
       {/* ======================================================
@@ -1113,20 +1726,7 @@ export function CameraCapture({
           />
 
         </div>
-      )}
 
-
-      {/* ======================================================
-          CAMERA ERROR
-          ====================================================== */}
-
-      {cameraError && (
-
-        <div className="mb-6 px-5 py-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-
-          {cameraError}
-
-        </div>
       )}
 
 
@@ -1139,14 +1739,26 @@ export function CameraCapture({
         <div className="space-y-4 animate-fade-in">
 
 
-          {/* CAMERA ACTIVE */}
+          {/* CAMERA ERROR */}
+
+          {cameraError && (
+
+            <div className="px-5 py-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+
+              {cameraError}
+
+            </div>
+
+          )}
+
+
+          {/* ==================================================
+              LIVE CAMERA
+              ================================================== */}
 
           {cameraActive && (
 
             <div className="relative bg-ink-950 rounded-2xl overflow-hidden animate-scale-in">
-
-
-              {/* VIDEO */}
 
               <video
                 ref={videoRef}
@@ -1157,89 +1769,58 @@ export function CameraCapture({
               />
 
 
-              {/* CAMERA BORDER */}
-
-              <div className="absolute inset-0 pointer-events-none border-2 border-white/20 m-4 rounded-xl" />
-
-
               {/* STATUS */}
 
-              <div className="absolute top-4 left-4">
+              <div className="absolute top-3 left-3">
 
-                <div className="flex items-center gap-2 px-3 py-2 bg-black/70 backdrop-blur-sm rounded-lg text-white text-xs">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-black/60 backdrop-blur text-white text-xs rounded-full">
 
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      autoCaptureEnabled
-                        ? 'bg-green-400 animate-pulse'
-                        : 'bg-yellow-400'
-                    }`}
-                  />
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
 
                   {autoCaptureEnabled
-                    ? 'Automatic capture ON'
-                    : 'Connecting camera...'}
+                    ? 'AUTO CAPTURE ACTIVE'
+                    : 'LIVE'}
 
                 </div>
 
               </div>
 
 
-              {/* CAPTURE MESSAGE */}
+              {/* CAMERA CONTROLS */}
 
-              <div className="absolute bottom-20 left-1/2 -translate-x-1/2">
-
-                <div className="px-4 py-2 bg-black/70 backdrop-blur-sm rounded-lg text-white text-xs whitespace-nowrap">
-
-                  {captureStatus}
-
-                </div>
-
-              </div>
-
-
-              {/* BUTTONS */}
-
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-
+              <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2">
 
                 {/* MANUAL CAPTURE */}
 
-                <button
-                  onClick={
-                    captureFromCamera
-                  }
-                  disabled={
-                    processingRef.current
-                  }
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-ink-900 text-sm font-medium rounded-xl hover:bg-ink-100 transition-colors disabled:opacity-50"
-                >
+                {!scheduledCapture && (
 
-                  <Camera
-                    size={16}
-                  />
+                  <button
+                    onClick={() =>
+                      captureFromCamera()
+                    }
+                    disabled={
+                      processingRef.current
+                    }
+                    className="flex items-center gap-2 px-4 py-2.5 bg-white text-ink-900 text-sm font-medium rounded-xl hover:bg-ink-100 transition-colors disabled:opacity-50"
+                  >
 
-                  Capture Now
+                    <Camera
+                      size={16}
+                    />
 
-                </button>
+                    Capture Photo
+
+                  </button>
+
+                )}
 
 
                 {/* SWITCH CAMERA */}
 
                 <button
-                  onClick={() => {
-
-                    stopCamera();
-
-                    setFacingMode(
-                      (mode) =>
-                        mode ===
-                        'environment'
-                          ? 'user'
-                          : 'environment'
-                    );
-
-                  }}
+                  onClick={
+                    switchCamera
+                  }
                   className="flex items-center gap-2 px-3 py-2.5 bg-white/90 text-ink-900 text-sm rounded-xl hover:bg-white transition-colors"
                   title="Switch camera"
                 >
@@ -1270,15 +1851,55 @@ export function CameraCapture({
               </div>
 
             </div>
+
           )}
 
 
-          {/* START CAMERA */}
+          {/* ==================================================
+              CAMERA STATUS
+              ================================================== */}
+
+          <div className="px-4 py-3 bg-ink-100 rounded-xl text-sm text-ink-600">
+
+            <div className="flex items-center gap-2">
+
+              {autoCaptureEnabled ? (
+
+                <Loader2
+                  size={16}
+                  className="animate-spin"
+                />
+
+              ) : (
+
+                <Camera
+                  size={16}
+                />
+
+              )}
+
+
+              <span>
+
+                {captureStatus}
+
+              </span>
+
+            </div>
+
+          </div>
+
+
+          {/* ==================================================
+              START CAMERA / UPLOAD
+              ================================================== */}
 
           {!cameraActive && (
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
+
+              {/* CAMERA */}
 
               <button
                 onClick={
@@ -1299,14 +1920,14 @@ export function CameraCapture({
 
                 <span className="text-sm font-medium text-ink-700">
 
-                  Start Automatic Inspection
+                  Use Phone Camera
 
                 </span>
 
 
                 <span className="text-xs text-ink-400">
 
-                  DroidCam • automatic capture
+                  DroidCam • live capture
 
                 </span>
 
@@ -1349,7 +1970,9 @@ export function CameraCapture({
 
 
               <input
-                ref={fileInputRef}
+                ref={
+                  fileInputRef
+                }
                 type="file"
                 accept="image/*"
                 capture="environment"
@@ -1360,14 +1983,16 @@ export function CameraCapture({
               />
 
             </div>
+
           )}
 
         </div>
+
       )}
 
 
       {/* ======================================================
-          UPLOADED IMAGE PREVIEW
+          PREVIEW
           ====================================================== */}
 
       {phase === 'preview' &&
@@ -1379,7 +2004,9 @@ export function CameraCapture({
             <div className="bg-ink-950 rounded-2xl overflow-hidden">
 
               <img
-                src={imageDataUrl}
+                src={
+                  imageDataUrl
+                }
                 alt="Captured solar panel"
                 className="w-full object-contain max-h-[450px]"
               />
@@ -1387,55 +2014,41 @@ export function CameraCapture({
             </div>
 
 
-            <div className="flex items-center justify-between">
+            <div className="flex gap-3">
 
-              <div className="text-sm text-ink-500">
+              <button
+                onClick={
+                  runInspectionPipeline
+                }
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-ink-900 text-white text-sm font-medium rounded-xl hover:bg-ink-800 transition-colors"
+              >
 
-                Panel:{' '}
+                <ScanSearch
+                  size={16}
+                />
 
-                <span className="font-medium text-ink-700">
+                Run Inspection
 
-                  {panelId}
-
-                </span>
-
-              </div>
-
-
-              <div className="flex gap-2.5">
-
-                <button
-                  onClick={
-                    resetCapture
-                  }
-                  className="px-4 py-2.5 text-sm font-medium text-ink-600 border border-ink-200 rounded-xl hover:bg-ink-50 transition-colors"
-                >
-
-                  Retake
-
-                </button>
+              </button>
 
 
-                <button
-                  onClick={
-                    runInspectionPipeline
-                  }
-                  className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-ink-900 rounded-xl hover:bg-ink-800 transition-all"
-                >
+              <button
+                onClick={
+                  resetCapture
+                }
+                className="px-4 py-3 border border-ink-200 text-ink-600 text-sm font-medium rounded-xl hover:bg-ink-50 transition-colors"
+              >
 
-                  <CheckCircle2
-                    size={16}
-                  />
+                <RefreshCw
+                  size={16}
+                />
 
-                  Run Inspection
-
-                </button>
-
-              </div>
+              </button>
 
             </div>
 
           </div>
+
         )}
 
 
@@ -1445,36 +2058,42 @@ export function CameraCapture({
 
       {phase === 'processing' && (
 
-        <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
+        <div className="space-y-5 animate-fade-in">
 
-          <div className="relative">
+          {imageDataUrl && (
 
-            <div className="w-16 h-16 rounded-full bg-ink-100 flex items-center justify-center">
+            <div className="bg-ink-950 rounded-2xl overflow-hidden">
 
-              <Loader2
-                size={28}
-                className="animate-spin text-ink-400"
+              <img
+                src={
+                  imageDataUrl
+                }
+                alt="Processing solar panel"
+                className="w-full object-contain max-h-[450px] opacity-70"
               />
 
             </div>
 
+          )}
+
+
+          <div className="flex items-center justify-center gap-3 px-5 py-4 bg-ink-100 rounded-xl text-sm text-ink-600">
+
+            <Loader2
+              size={18}
+              className="animate-spin"
+            />
+
+            <span>
+
+              Analyzing solar panel image...
+
+            </span>
+
           </div>
 
-
-          <p className="mt-6 text-sm font-medium text-ink-700">
-
-            Running AI inspection
-
-          </p>
-
-
-          <p className="mt-1.5 text-xs text-ink-400">
-
-            GPS weather check, model analysis, and cleaning decision
-
-          </p>
-
         </div>
+
       )}
 
 
@@ -1485,97 +2104,49 @@ export function CameraCapture({
       {phase === 'success' &&
         result && (
 
-          <div className="space-y-5 animate-fade-in-up">
+          <div className="space-y-5 animate-fade-in">
 
 
-            <div className="flex items-center gap-2.5">
-
-              {result.processing_status ===
-              'completed' ? (
-
-                <CheckCircle2
-                  size={22}
-                  className="text-green-600"
-                />
-
-              ) : (
-
-                <AlertCircle
-                  size={22}
-                  className="text-red-600"
-                />
-
-              )}
-
-
-              <h3 className="text-lg font-semibold text-ink-900">
-
-                {result.processing_status ===
-                'completed'
-                  ? 'Inspection Complete'
-                  : 'Inspection Failed'}
-
-              </h3>
-
-            </div>
-
-
-            {/* ORIGINAL IMAGE */}
+            {/* IMAGE */}
 
             {imageDataUrl && (
 
-              <div className="space-y-3">
+              <div className="bg-ink-950 rounded-2xl overflow-hidden">
 
-                <p className="text-xs font-medium text-ink-400">
-
-                  Captured Image
-
-                </p>
-
-
-                <div className="bg-ink-950 rounded-2xl overflow-hidden">
-
-                  <img
-                    src={imageDataUrl}
-                    alt="Inspected solar panel"
-                    className="w-full object-contain max-h-[350px]"
-                  />
-
-                </div>
+                <img
+                  src={
+                    imageDataUrl
+                  }
+                  alt="Inspected solar panel"
+                  className="w-full object-contain max-h-[450px]"
+                />
 
               </div>
+
             )}
 
 
             {/* RESULT */}
 
-            <div className="grid grid-cols-2 gap-px bg-ink-200/60 rounded-2xl overflow-hidden border border-ink-200/60">
+            <div className="bg-white border border-ink-200 rounded-2xl p-5">
 
+              <div className="flex items-center justify-between mb-4">
 
-              <div className="bg-white p-5">
+                <div className="flex items-center gap-2">
 
-                <p className="text-xs text-ink-400 mb-1">
+                  <CheckCircle2
+                    size={20}
+                    className="text-green-600"
+                  />
 
-                  Panel
+                  <h3 className="font-semibold text-ink-900">
 
-                </p>
+                    Inspection Result
 
-                <p className="text-sm font-medium text-ink-800">
+                  </h3>
 
-                  {result.panel_id}
+                </div>
 
-                </p>
-
-              </div>
-
-
-              <div className="bg-white p-5">
-
-                <p className="text-xs text-ink-400 mb-1.5">
-
-                  Status
-
-                </p>
 
                 <FaultBadge
                   isFault={
@@ -1586,404 +2157,299 @@ export function CameraCapture({
               </div>
 
 
-              <div className="bg-white p-5">
-
-                <p className="text-xs text-ink-400 mb-1">
-
-                  Prediction
-
-                </p>
-
-                <p className="text-sm font-medium text-ink-800">
-
-                  {result.prediction ??
-                    'N/A'}
-
-                </p>
-
-              </div>
+              <div className="space-y-4">
 
 
-              <div className="bg-white p-5">
+                {/* PREDICTION */}
 
-                <p className="text-xs text-ink-400 mb-1.5">
+                <div>
 
-                  Confidence
+                  <p className="text-xs text-ink-400 mb-1">
 
-                </p>
+                    Prediction
 
-                <ConfidenceBar
-                  confidence={
-                    result.confidence
-                  }
-                />
+                  </p>
+
+                  <p className="text-sm font-medium text-ink-900">
+
+                    {result.prediction ||
+                      result.fault_type ||
+                      'Unknown'}
+
+                  </p>
+
+                </div>
+
+
+                {/* CONFIDENCE */}
+
+                {typeof result.confidence ===
+                  'number' && (
+
+                  <div>
+
+                    <p className="text-xs text-ink-400 mb-2">
+
+                      Confidence
+
+                    </p>
+
+                    <ConfidenceBar
+                      confidence={
+                        result.confidence
+                      }
+                    />
+
+                  </div>
+
+                )}
+
+
+                {/* WEATHER */}
+
+                {(
+                  result.raw_output as {
+                    weather?: WeatherSnapshot;
+                  } | null
+                )?.weather && (
+
+                  <div className="pt-3 border-t border-ink-100">
+
+                    <div className="flex items-center gap-2 mb-2">
+
+                      <CloudSun
+                        size={16}
+                        className="text-ink-400"
+                      />
+
+                      <span className="text-xs font-medium text-ink-600">
+
+                        Weather
+
+                      </span>
+
+                    </div>
+
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+
+                      <div>
+
+                        <span className="text-ink-400">
+
+                          Temperature
+
+                        </span>
+
+                        <p className="font-medium">
+
+                          {
+                            (
+                              result.raw_output as {
+                                weather?: WeatherSnapshot;
+                              }
+                            ).weather
+                              ?.temperature
+                          }
+                          °C
+
+                        </p>
+
+                      </div>
+
+
+                      <div>
+
+                        <span className="text-ink-400">
+
+                          Rain
+
+                        </span>
+
+                        <p className="font-medium">
+
+                          {
+                            (
+                              result.raw_output as {
+                                weather?: WeatherSnapshot;
+                              }
+                            ).weather
+                              ?.precipitation
+                          }
+                          mm
+
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                )}
+
+
+                {/* CLEANING DECISION */}
+
+                {(
+                  result.raw_output as {
+                    cleaning_decision?: CleaningDecision;
+                  } | null
+                )?.cleaning_decision && (
+
+                  <div className="pt-3 border-t border-ink-100">
+
+                    <div className="flex items-center gap-2 mb-2">
+
+                      <Droplets
+                        size={16}
+                        className="text-ink-400"
+                      />
+
+                      <span className="text-xs font-medium text-ink-600">
+
+                        Cleaning Decision
+
+                      </span>
+
+                    </div>
+
+
+                    <p className="text-sm font-medium text-ink-900">
+
+                      {
+                        (
+                          result.raw_output as {
+                            cleaning_decision?: CleaningDecision;
+                          }
+                        ).cleaning_decision
+                          ?.label
+                      }
+
+                    </p>
+
+
+                    <p className="mt-1 text-xs text-ink-500">
+
+                      {
+                        (
+                          result.raw_output as {
+                            cleaning_decision?: CleaningDecision;
+                          }
+                        ).cleaning_decision
+                          ?.reason
+                      }
+
+                    </p>
+
+                  </div>
+
+                )}
 
               </div>
 
             </div>
 
 
-            {/* BACKEND ERROR */}
+            {/* ACTIONS */}
 
-            {result.error_message && (
+            <div className="flex gap-3">
 
-              <div className="px-5 py-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+              <button
+                onClick={
+                  resetCapture
+                }
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-ink-900 text-white text-sm font-medium rounded-xl hover:bg-ink-800 transition-colors"
+              >
 
-                {result.error_message}
+                <Camera
+                  size={16}
+                />
+
+                New Inspection
+
+              </button>
+
+            </div>
+
+
+            {/* SCHEDULE INFO */}
+
+            {scheduledCapture && (
+
+              <div className="px-4 py-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-800">
+
+                Scheduled inspection is still active.
+                The next image will be captured automatically
+                in approximately 5 seconds.
 
               </div>
 
             )}
 
+          </div>
 
-            {/* WEATHER */}
+        )}
 
-            <InspectionContext
-              result={result}
+
+      {/* ======================================================
+          ERROR PHASE
+          ====================================================== */}
+
+      {phase === 'error' && (
+
+        <div className="space-y-5 animate-fade-in">
+
+          <div className="flex flex-col items-center justify-center py-12 px-6 bg-red-50 border border-red-200 rounded-2xl text-center">
+
+            <AlertCircle
+              size={32}
+              className="text-red-500 mb-3"
             />
 
 
-            {/* GRAD-CAM */}
+            <h3 className="text-base font-semibold text-red-900">
 
-            <GradCamPanel
-              result={result}
-            />
+              Inspection Failed
+
+            </h3>
 
 
-            {/* NEW INSPECTION */}
+            <p className="mt-1 text-sm text-red-700">
+
+              {error ||
+                'Something went wrong while processing the image.'}
+
+            </p>
+
+          </div>
+
+
+          <div className="flex gap-3">
 
             <button
               onClick={
                 resetCapture
               }
-              className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-ink-900 rounded-xl hover:bg-ink-800 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-ink-900 text-white text-sm font-medium rounded-xl hover:bg-ink-800 transition-colors"
             >
 
-              <Camera
+              <RefreshCw
                 size={16}
               />
 
-              New Inspection
+              Try Again
 
             </button>
 
           </div>
-        )}
-
-
-      {/* ======================================================
-          ERROR
-          ====================================================== */}
-
-      {phase === 'error' && (
-
-        <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
-
-          <AlertCircle
-            size={32}
-            className="text-red-500"
-          />
-
-
-          <p className="mt-4 text-sm font-medium text-ink-700">
-
-            Inspection failed
-
-          </p>
-
-
-          <button
-            onClick={() =>
-              setPhase(
-                imageBlob
-                  ? 'preview'
-                  : 'idle'
-              )
-            }
-            className="mt-5 px-4 py-2.5 text-sm font-medium text-ink-600 border border-ink-200 rounded-xl hover:bg-ink-50 transition-colors"
-          >
-
-            Try Again
-
-          </button>
 
         </div>
+
       )}
 
     </div>
+
   );
-}
 
-
-// ============================================================
-// GRAD-CAM PANEL
-// ============================================================
-
-function GradCamPanel({
-  result,
-}: {
-  result: Inspection;
-}) {
-
-  const gradcamImage =
-    result.raw_output
-      ?.gradcam_image as
-      | string
-      | undefined;
-
-
-  const gradcamError =
-    result.raw_output
-      ?.gradcam_error as
-      | string
-      | undefined;
-
-
-  if (
-    !gradcamImage &&
-    !gradcamError
-  ) {
-
-    return (
-
-      <div className="bg-white border border-amber-200 rounded-xl p-4">
-
-        <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5">
-
-          <ScanSearch
-            size={13}
-          />
-
-          AI Explainability - Grad-CAM
-
-        </p>
-
-
-        <p className="text-sm text-amber-700">
-
-          Grad-CAM heatmap was not returned by the AI service.
-
-        </p>
-
-      </div>
-    );
-  }
-
-
-  return (
-
-    <div className="space-y-3">
-
-      <p className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
-
-        <ScanSearch
-          size={13}
-        />
-
-        AI Explainability - Grad-CAM
-
-      </p>
-
-
-      {gradcamImage ? (
-
-        <div className="bg-ink-950 rounded-2xl overflow-hidden">
-
-          <img
-            src={gradcamImage}
-            alt="Grad-CAM heatmap for solar panel"
-            className="w-full object-contain max-h-[350px]"
-          />
-
-        </div>
-
-      ) : (
-
-        <div className="px-5 py-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
-
-          {gradcamError ??
-            'Grad-CAM heatmap could not be generated for this image.'}
-
-        </div>
-
-      )}
-
-
-      {gradcamImage &&
-        gradcamError && (
-
-          <p className="text-xs text-amber-700">
-
-            {gradcamError}
-
-          </p>
-
-        )}
-
-    </div>
-  );
-}
-
-
-// ============================================================
-// WEATHER + CLEANING DECISION
-// ============================================================
-
-function InspectionContext({
-  result,
-}: {
-  result: Inspection;
-}) {
-
-  const weather =
-    result.raw_output
-      ?.weather as
-      | WeatherSnapshot
-      | undefined;
-
-
-  const cleaningDecision =
-    result.raw_output
-      ?.cleaning_decision as
-      | CleaningDecision
-      | undefined;
-
-
-  if (
-    !weather &&
-    !cleaningDecision
-  ) {
-
-    return null;
-  }
-
-
-  return (
-
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
-
-      {/* WEATHER */}
-
-      {weather && (
-
-        <div className="bg-white border border-ink-200/60 rounded-xl p-4">
-
-          <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5">
-
-            <CloudSun
-              size={13}
-            />
-
-            Weather
-
-          </p>
-
-
-          {weather.error ? (
-
-            <p className="text-sm text-amber-700">
-
-              {weather.error}
-
-            </p>
-
-          ) : (
-
-            <p className="text-sm text-ink-700">
-
-              {formatWeatherValue(
-                weather.temperature_c,
-                'C'
-              )}
-
-              {' | rain '}
-
-              {formatWeatherValue(
-                weather.forecast_24h_precipitation_mm,
-                'mm'
-              )}
-
-            </p>
-
-          )}
-
-
-          {!weather.error && (
-
-            <p className="text-xs text-ink-400 mt-1">
-
-              GPS{' '}
-
-              {weather.latitude.toFixed(
-                4
-              )}
-
-              ,{' '}
-
-              {weather.longitude.toFixed(
-                4
-              )}
-
-            </p>
-
-          )}
-
-        </div>
-      )}
-
-
-      {/* CLEANING DECISION */}
-
-      {cleaningDecision && (
-
-        <div className="bg-white border border-ink-200/60 rounded-xl p-4">
-
-          <p className="text-xs text-ink-400 mb-2 flex items-center gap-1.5">
-
-            <Droplets
-              size={13}
-            />
-
-            Cleaning Decision
-
-          </p>
-
-
-          <p className="text-sm font-medium text-ink-800">
-
-            {cleaningDecision.label}
-
-          </p>
-
-
-          <p className="text-xs text-ink-500 mt-1">
-
-            {cleaningDecision.reason}
-
-          </p>
-
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-
-// ============================================================
-// WEATHER FORMAT
-// ============================================================
-
-function formatWeatherValue(
-  value:
-    | number
-    | null
-    | undefined,
-  unit: string
-): string {
-
-  return value == null
-    ? 'N/A'
-    : `${value}${unit}`;
 }

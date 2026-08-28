@@ -1,83 +1,176 @@
-# Solar Panel Fault Detection
+# SolarGuard – AI-Based Solar Panel Fault Detection System
 
-A React web application for capturing solar-panel photos, classifying their condition with an AI model, recording inspections, and notifying users when a fault is found.
+SolarGuard is an AI-based solar panel monitoring and fault detection system designed to automatically inspect solar panels using a phone camera connected to the computer through DroidCam.
 
-## Features
+The system captures solar panel images, sends them to an AI inference service, detects possible faults, stores inspection results, and presents the results through a web dashboard.
 
-- Capture a photo with a device camera or upload an existing image
-- Classify the panel as `Clean`, `Bird-drop`, `Dusty`, `Electrical-damage`, `Physical-Damage`, or `Snow-Covered`
-- Store inspection history, confidence, status, and schedules in Supabase
-- Authenticate users with Supabase email/password authentication
-- Send browser notifications when a fault is detected
+The system also supports scheduled automatic inspections, where the camera starts capturing images automatically at the configured inspection time.
 
-## Tech stack
+---
 
-- React, TypeScript, Vite, and Tailwind CSS
-- Supabase (PostgreSQL and Auth)
-- PyTorch, FastAPI, and Uvicorn for model training and inference
+## 1. Project Overview
 
-## Frontend setup
+Solar panels are continuously exposed to environmental conditions such as dust, weather, physical damage, and other factors that can affect their performance.
 
-```powershell
-npm install
-npm run dev
-```
+Manually inspecting large or elevated solar panels can be difficult and time-consuming.
 
-Create a `.env` file in the project root with your Supabase values:
+SolarGuard aims to provide an automated visual inspection system.
 
-```dotenv
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_MODEL_INFERENCE_URL=http://localhost:8000/predict
-```
+### Main workflow
 
-The schedule runs in the open browser. Set the camera field to the exact name shown by
-Windows, such as `DroidCam`, grant camera permission once, and keep SolarGuard open at the
-scheduled time. The browser captures one image, runs the inspection, stores it in history,
-and sends a fault notification when a fault is detected.
+Phone Camera
+↓
+DroidCam
+↓
+Windows Camera Device
+↓
+Browser
+↓
+React Frontend
+↓
+Inspection API
+↓
+AI / MobileNetV3 Model
+↓
+Prediction
+↓
+Database
+↓
+Dashboard / History / Notification
 
-For DroidCam over phone Wi-Fi, run `ml_service/camera_publisher.py` to bridge
-`http://PHONE_IP:4747/video` to the FastAPI WebSocket relay. Set
-`VITE_CAMERA_STREAM_URL=ws://SERVER_IP:8000/camera` and
-`VITE_CAMERA_STREAM_TOKEN` in `.env`, then restart Vite. The relay must be reachable by
-both the publisher and the browser, and SolarGuard must remain open and signed in.
 
-Apply the SQL migrations in `supabase/migrations/` to your Supabase project before using the application.
+---
 
-## Train and run the AI model
+# 2. Main Objectives
 
-The local `Faulty_solar_panel/` dataset is intentionally excluded from Git. It must contain one folder per class:
+The project currently aims to provide:
 
-```text
-Faulty_solar_panel/
-├── Bird-drop/
-├── Clean/
-├── Dusty/
-├── Electrical-damage/
-├── Physical-Damage/
-└── Snow-Covered/
-```
+- Live solar panel camera monitoring
+- Phone camera integration
+- Automatic image capture
+- Scheduled inspections
+- AI-based fault detection
+- Confidence score for predictions
+- Inspection history
+- Dashboard statistics
+- Weather information
+- GPS information
+- Cleaning recommendation
+- Grad-CAM explainability
+- Fault notifications
+- Image upload as an alternative to camera capture
+- User authentication
+- Model-service integration
 
-Install Python **3.11 or 3.12**, then run:
 
-```powershell
-cd ml_service
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python train.py --epochs 12
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
+---
 
-The model is saved to `ml_service/models/solar_panel_classifier.pt`. Keep the inference service running while using the camera inspection feature.
+# 3. Technology Stack
 
-`Clean` is handled as normal. Every other class is treated as a fault and can trigger a notification.
+## Frontend
 
-## Available scripts
+### React
 
-```powershell
-npm run dev        # Start the Vite development server
-npm run build      # Create a production build
-npm run typecheck  # Check TypeScript types
-npm run lint       # Run ESLint
-```
+React is used to build the web interface.
+
+The application is divided into reusable components such as:
+
+- Dashboard
+- CameraCapture
+- InspectionHistory
+- InspectionDetails
+- ScheduleSettings
+- NotificationStatus
+- AuthPage
+
+React manages:
+
+- UI state
+- Camera state
+- Schedule state
+- Inspection results
+- Navigation
+- User interactions
+
+
+### TypeScript
+
+TypeScript is used instead of plain JavaScript.
+
+It provides:
+
+- Type safety
+- Better error detection
+- Interfaces for inspection data
+- Safer component properties
+- Easier maintenance
+
+
+### Tailwind CSS
+
+Tailwind CSS is used for the user interface styling.
+
+It provides utility classes for:
+
+- Layout
+- Spacing
+- Colors
+- Buttons
+- Cards
+- Responsive design
+- Animations
+
+
+### Lucide React
+
+Lucide React provides the icons used throughout the application.
+
+Examples include:
+
+- Camera
+- Dashboard
+- History
+- Settings
+- Sun
+- Upload
+- Alert
+- Check
+- Notification icons
+
+
+---
+
+# 4. Camera System
+
+## DroidCam
+
+DroidCam is currently being used to connect the phone camera to the computer.
+
+The architecture is:
+
+Phone
+↓
+DroidCam Android App
+↓
+DroidCam Client
+↓
+Windows
+↓
+Browser Camera API
+↓
+SolarGuard
+
+
+This allows the phone to act as the camera without requiring a physical USB camera mounted directly to the computer.
+
+This is especially useful for the project because the solar panel may be located at a higher altitude.
+
+
+---
+
+# 5. Browser Camera API
+
+The React application uses:
+
+```javascript
+navigator.mediaDevices.getUserMedia()
