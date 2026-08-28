@@ -31,6 +31,17 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 VITE_MODEL_INFERENCE_URL=http://localhost:8000/predict
 ```
 
+The schedule runs in the open browser. Set the camera field to the exact name shown by
+Windows, such as `DroidCam`, grant camera permission once, and keep SolarGuard open at the
+scheduled time. The browser captures one image, runs the inspection, stores it in history,
+and sends a fault notification when a fault is detected.
+
+For DroidCam over phone Wi-Fi, run `ml_service/camera_publisher.py` to bridge
+`http://PHONE_IP:4747/video` to the FastAPI WebSocket relay. Set
+`VITE_CAMERA_STREAM_URL=ws://SERVER_IP:8000/camera` and
+`VITE_CAMERA_STREAM_TOKEN` in `.env`, then restart Vite. The relay must be reachable by
+both the publisher and the browser, and SolarGuard must remain open and signed in.
+
 Apply the SQL migrations in `supabase/migrations/` to your Supabase project before using the application.
 
 ## Train and run the AI model
