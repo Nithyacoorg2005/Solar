@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle, CloudSun, Droplets, Wind } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle, CloudSun, Droplets, Wind, ScanSearch } from 'lucide-react';
 import { getInspectionById, formatDateTime, formatDate, formatTime } from '@/lib/inspectionApi';
 import type { CleaningDecision, Inspection, WeatherSnapshot } from '@/types';
 import { FaultBadge, StatusBadge, NotificationBadge, ConfidenceBar, Spinner } from './StatusBadges';
@@ -57,6 +57,8 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
   const rawClasses = inspection.raw_output?.all_classes as { class: string; confidence: number }[] | undefined;
   const weather = inspection.raw_output?.weather as WeatherSnapshot | undefined;
   const cleaningDecision = inspection.raw_output?.cleaning_decision as CleaningDecision | undefined;
+  const gradcamImage = inspection.raw_output?.gradcam_image as string | undefined;
+  const gradcamError = inspection.raw_output?.gradcam_error as string | undefined;
 
   return (
     <div className="space-y-8 max-w-3xl mx-auto animate-fade-in">
@@ -74,15 +76,40 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
       </div>
 
       {/* Image */}
-      <div className="bg-ink-950 rounded-2xl overflow-hidden">
-        {inspection.image_path ? (
-          <img src={inspection.image_path} alt="Inspected solar panel" className="w-full object-contain max-h-[500px]" />
-        ) : (
-          <div className="w-full h-64 flex items-center justify-center">
-            <ImageOff size={32} className="text-ink-600" />
-          </div>
-        )}
+      <div className="space-y-3">
+        <p className="text-xs font-medium text-ink-400">Original Image</p>
+        <div className="bg-ink-950 rounded-2xl overflow-hidden">
+          {inspection.image_path ? (
+            <img src={inspection.image_path} alt="Inspected solar panel" className="w-full object-contain max-h-[500px]" />
+          ) : (
+            <div className="w-full h-64 flex items-center justify-center">
+              <ImageOff size={32} className="text-ink-600" />
+            </div>
+          )}
+        </div>
       </div>
+
+      {(gradcamImage || gradcamError) && (
+        <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
+          <div className="px-6 py-4 border-b border-ink-100">
+            <h3 className="text-sm font-semibold text-ink-700 flex items-center gap-1.5">
+              <ScanSearch size={14} /> AI Explainability - Grad-CAM
+            </h3>
+          </div>
+          {gradcamImage ? (
+            <div className="bg-ink-950">
+              <img src={gradcamImage} alt="Grad-CAM heatmap for inspected solar panel" className="w-full object-contain max-h-[500px]" />
+            </div>
+          ) : (
+            <div className="px-6 py-5 text-sm text-amber-700 bg-amber-50">
+              {gradcamError ?? 'Grad-CAM heatmap could not be generated for this image.'}
+            </div>
+          )}
+          {gradcamImage && gradcamError && (
+            <p className="px-6 py-3 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">{gradcamError}</p>
+          )}
+        </div>
+      )}
 
       {/* Details grid */}
       <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">

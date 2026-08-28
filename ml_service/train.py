@@ -1,4 +1,4 @@
-"""Train a solar-panel condition classifier from the local image folders.
+"""Train a MobileNetV3 solar-panel condition classifier from local image folders.
 
 Expected dataset layout:
   Faulty_solar_panel/
@@ -23,6 +23,10 @@ from torchvision import datasets, models, transforms
 
 
 IMAGE_SIZE = 224
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+DEFAULT_DATA_DIR = PROJECT_ROOT / "Faulty_solar_panel"
+DEFAULT_OUTPUT = SCRIPT_DIR / "models" / "solar_panel_mobilenetv3.pth"
 
 
 def make_transforms() -> tuple[transforms.Compose, transforms.Compose]:
@@ -75,10 +79,27 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> tupl
     return total_loss / total, correct / total
 
 
+def build_model(num_classes: int) -> nn.Module:
+    weights = models.MobileNet_V3_Small_Weights.DEFAULT
+    model = models.mobilenet_v3_small(weights=weights)
+
+    for parameter in model.features.parameters():
+        parameter.requires_grad = False
+
+    classifier_input_features = model.classifier[0].in_features
+    model.classifier = nn.Sequential(
+        nn.Linear(classifier_input_features, 512),
+        nn.Hardswish(),
+        nn.Dropout(p=0.2, inplace=True),
+        nn.Linear(512, num_classes),
+    )
+    return model
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", type=Path, default=Path("../Faulty_solar_panel"))
-    parser.add_argument("--output", type=Path, default=Path("models/solar_panel_classifier.pt"))
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
@@ -105,19 +126,18 @@ def main() -> None:
     validation_loader = DataLoader(Subset(validation_dataset, validation_indices), batch_size=args.batch_size, shuffle=False, num_workers=0)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    try:
-        weights = models.ResNet18_Weights.DEFAULT
-        model = models.resnet18(weights=weights)
-    except Exception as error:
-        print(f"Could not download pretrained weights ({error}); training from scratch instead.")
-        model = models.resnet18(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, len(label_dataset.classes))
+    model = build_model(len(label_dataset.classes))
     model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(
+        (parameter for parameter in model.parameters() if parameter.requires_grad),
+        lr=args.learning_rate,
+        weight_decay=1e-4,
+    )
     loss_fn = nn.CrossEntropyLoss()
 
     print(f"Classes: {label_dataset.classes}")
     print(f"Training: {len(train_indices)} images | validation: {len(validation_indices)} images | device: {device}")
+    print("Model: torchvision MobileNetV3 Small | pretrained weights: DEFAULT | frozen feature extractor")
     best_accuracy = -1.0
     args.output.parent.mkdir(parents=True, exist_ok=True)
     for epoch in range(1, args.epochs + 1):
@@ -136,6 +156,7 @@ def main() -> None:
                 "classes": label_dataset.classes,
                 "image_size": IMAGE_SIZE,
                 "validation_accuracy": validation_accuracy,
+                "architecture": "mobilenet_v3_small",
             }, args.output)
     print(f"Saved best model ({best_accuracy:.2%} validation accuracy) to {args.output}")
 

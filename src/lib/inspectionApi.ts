@@ -166,6 +166,7 @@ export async function runInspection(
       model: prediction,
       weather,
       cleaning_decision: cleaningDecision,
+      raw_model_response: prediction.raw_response,
       ...prediction,
     } as Record<string, unknown>,
   });
