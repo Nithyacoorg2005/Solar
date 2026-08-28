@@ -31,6 +31,11 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 VITE_MODEL_INFERENCE_URL=http://localhost:8000/predict
 ```
 
+The schedule runs in the open browser. Set the camera field to the exact name shown by
+Windows, such as `DroidCam`, grant camera permission once, and keep SolarGuard open at the
+scheduled time. The browser captures one image, runs the inspection, stores it in history,
+and sends a fault notification when a fault is detected.
+
 Apply the SQL migrations in `supabase/migrations/` to your Supabase project before using the application.
 
 ## Train and run the AI model

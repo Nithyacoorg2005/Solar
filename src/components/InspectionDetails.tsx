@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle, CloudSun, Droplets, Wind, ScanSearch } from 'lucide-react';
-import { getInspectionById, formatDateTime, formatDate, formatTime } from '@/lib/inspectionApi';
+import { ArrowLeft, Calendar, Clock, ImageOff, Cpu, Bell, MapPin, AlertCircle, CloudSun, Droplets, Wind, ScanSearch, Play } from 'lucide-react';
+import { getInspectionById, formatDateTime, formatDate, formatTime, runInspection } from '@/lib/inspectionApi';
+import { ensureNotificationPermission, sendFaultNotification } from '@/lib/notificationService';
 import type { CleaningDecision, Inspection, WeatherSnapshot } from '@/types';
 import { FaultBadge, StatusBadge, NotificationBadge, ConfidenceBar, Spinner } from './StatusBadges';
 
@@ -13,6 +14,7 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +34,25 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
     load();
     return () => { cancelled = true; };
   }, [inspectionId]);
+
+  const runSavedInspection = async () => {
+    if (!inspection?.image_path || running) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const imageBlob = await (await fetch(inspection.image_path)).blob();
+      await ensureNotificationPermission();
+      const updated = await runInspection(inspection.panel_id, imageBlob, inspection.trigger_type, inspection.id);
+      if (updated.is_fault && updated.processing_status === 'completed') {
+        await sendFaultNotification(updated);
+      }
+      setInspection(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run inspection.');
+    } finally {
+      setRunning(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -74,6 +95,17 @@ export function InspectionDetails({ inspectionId, onBack }: InspectionDetailsPro
         </div>
         <FaultBadge isFault={inspection.is_fault} />
       </div>
+
+      {inspection.processing_status === 'pending' && (
+        <button
+          type="button"
+          onClick={runSavedInspection}
+          disabled={running}
+          className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-ink-900 rounded-xl hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Play size={16} /> {running ? 'Running Inspection...' : 'Run Inspection'}
+        </button>
+      )}
 
       {/* Image */}
       <div className="space-y-3">

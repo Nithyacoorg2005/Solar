@@ -35,6 +35,15 @@ export async function createInspection(input: InspectionCreate): Promise<Inspect
   return data as Inspection;
 }
 
+export async function saveCapturedInspection(panelId: string, imageBlob: Blob): Promise<Inspection> {
+  return createInspection({
+    panel_id: panelId,
+    image_path: await blobToDataUrl(imageBlob),
+    inspection_at: new Date().toISOString(),
+    trigger_type: 'scheduled',
+  });
+}
+
 export async function updateInspection(id: string, update: InspectionUpdate): Promise<Inspection> {
   const { data, error } = await supabase
     .from('inspections')
@@ -87,7 +96,7 @@ export async function getInspectionById(id: string): Promise<Inspection | null> 
 }
 
 export async function getDashboardStats(panelId?: string): Promise<DashboardStats> {
-  let query = supabase.from('inspections').select('is_fault, processing_status');
+  let query = supabase.from('inspections').select('is_fault, processing_status, raw_output');
   if (panelId) query = query.eq('panel_id', panelId);
 
   const { data, error } = await query;
@@ -97,9 +106,17 @@ export async function getDashboardStats(panelId?: string): Promise<DashboardStat
   const total = rows.length;
   const faults = rows.filter((r) => r.is_fault).length;
   const normal = total - faults;
+  const cleaning = rows.filter((row) => {
+    const decision = row.raw_output?.cleaning_decision as { should_clean?: unknown } | undefined;
+    return decision?.should_clean === true;
+  }).length;
+  const damage = rows.filter((row) => {
+    const decision = row.raw_output?.cleaning_decision as { should_clean?: unknown } | undefined;
+    return row.is_fault && decision?.should_clean !== true;
+  }).length;
   const latest = await getLatestInspection(panelId);
 
-  return { total, normal, faults, latest };
+  return { total, normal, faults, cleaning, damage, latest };
 }
 
 /**
@@ -116,18 +133,22 @@ export async function getDashboardStats(panelId?: string): Promise<DashboardStat
 export async function runInspection(
   panelId: string,
   imageBlob: Blob,
-  triggerType: 'manual' | 'scheduled' = 'manual'
+  triggerType: 'manual' | 'scheduled' = 'manual',
+  existingInspectionId?: string,
 ): Promise<Inspection> {
   // Step 1: Convert image to data URL for storage
   const imageDataUrl = await blobToDataUrl(imageBlob);
 
   // Step 2: Create inspection record
-  const inspection = await createInspection({
-    panel_id: panelId,
-    image_path: imageDataUrl,
-    inspection_at: new Date().toISOString(),
-    trigger_type: triggerType,
-  });
+  const inspection = existingInspectionId
+    ? await getInspectionById(existingInspectionId)
+    : await createInspection({
+        panel_id: panelId,
+        image_path: imageDataUrl,
+        inspection_at: new Date().toISOString(),
+        trigger_type: triggerType,
+      });
+  if (!inspection) throw new Error('Saved inspection could not be found.');
 
   // Step 3: Mark as processing
   await updateInspection(inspection.id, { processing_status: 'processing' });

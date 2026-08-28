@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from torch import nn
@@ -40,6 +40,13 @@ model: nn.Module | None = None
 classes: list[str] = []
 transform: transforms.Compose | None = None
 device = torch.device("cpu")
+camera_publisher: WebSocket | None = None
+camera_viewers: set[WebSocket] = set()
+
+
+def camera_stream_token_is_valid(token: str) -> bool:
+    expected_token = os.getenv("CAMERA_STREAM_TOKEN", "")
+    return bool(expected_token) and token == expected_token
 
 
 def load_model() -> None:
@@ -98,6 +105,48 @@ async def predict(image: UploadFile = File(...)) -> dict[str, object]:
         result["gradcam_error"] = f"Grad-CAM generation failed: {error}"
 
     return result
+
+
+@app.websocket("/camera/{role}/{token}")
+async def camera_stream(websocket: WebSocket, role: str, token: str) -> None:
+    global camera_publisher
+    if role not in {"publish", "view"} or not camera_stream_token_is_valid(token):
+        await websocket.close(code=1008, reason="Invalid camera stream credentials")
+        return
+
+    if role == "publish":
+        if camera_publisher is not None:
+            await websocket.close(code=1008, reason="A phone camera is already connected")
+            return
+        await websocket.accept()
+        camera_publisher = websocket
+        try:
+            while True:
+                frame = await websocket.receive_bytes()
+                if len(frame) > 2_000_000:
+                    continue
+                disconnected_viewers: set[WebSocket] = set()
+                for viewer in camera_viewers:
+                    try:
+                        await viewer.send_bytes(frame)
+                    except Exception:
+                        disconnected_viewers.add(viewer)
+                camera_viewers.difference_update(disconnected_viewers)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            camera_publisher = None
+        return
+
+    await websocket.accept()
+    camera_viewers.add(websocket)
+    try:
+        while True:
+            await websocket.receive()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        camera_viewers.discard(websocket)
 
 
 def create_gradcam_data_url(original_image: Image.Image, heatmap: torch.Tensor, alpha: float = 0.45) -> str:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sun, LayoutDashboard, Camera, History, Settings, Menu, X, LogOut, Info } from 'lucide-react';
 import { Dashboard } from '@/components/Dashboard';
 import { CameraCapture } from '@/components/CameraCapture';
@@ -9,7 +9,7 @@ import { NotificationStatus } from '@/components/NotificationStatus';
 import { AuthPage } from '@/components/AuthPage';
 import { useAuth } from '@/lib/authContext';
 import { isModelConnected } from '@/lib/modelAdapter';
-import type { Inspection } from '@/types';
+import { getSchedule, saveCapturedInspection } from '@/lib/inspectionApi';
 
 type View = 'dashboard' | 'capture' | 'history' | 'details' | 'schedule' | 'about';
 
@@ -22,12 +22,62 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [panelId] = useState(DEFAULT_PANEL_ID);
+  const scheduledInspectionRunning = useRef(false);
+  const lastScheduledRun = useRef<string | null>(null);
 
   const modelConnected = isModelConnected();
-
-  const handleInspectionComplete = (_inspection: Inspection) => {
+  const handleInspectionComplete = () => {
     setRefreshKey((k) => k + 1);
   };
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    async function checkSchedule() {
+      if (cancelled || scheduledInspectionRunning.current) return;
+
+      try {
+        const schedule = await getSchedule();
+        if (!schedule?.is_active || schedule.days_of_week.length === 0) return;
+
+        const now = new Date();
+        const [scheduledHour, scheduledMinute] = schedule.inspection_time.split(':').map(Number);
+        const runKey = `${now.toDateString()}-${schedule.inspection_time}`;
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const scheduledMinutes = scheduledHour * 60 + scheduledMinute;
+        const minutesSinceSchedule = currentMinutes - scheduledMinutes;
+        const isDue = schedule.days_of_week.includes(now.getDay())
+          && minutesSinceSchedule >= 0
+          && minutesSinceSchedule <= 15;
+
+        if (!isDue || lastScheduledRun.current === runKey) return;
+        if (!navigator.mediaDevices?.getUserMedia) {
+          console.warn('Scheduled inspection skipped: camera access is not supported by this browser.');
+          return;
+        }
+
+        scheduledInspectionRunning.current = true;
+        const imageBlob = await captureScheduledImage(schedule.camera_device);
+        if (cancelled) return;
+
+        await saveCapturedInspection(schedule.panel_id, imageBlob);
+        lastScheduledRun.current = runKey;
+        if (!cancelled) setRefreshKey((key) => key + 1);
+      } catch (err) {
+        console.error('Scheduled inspection failed:', err);
+      } finally {
+        scheduledInspectionRunning.current = false;
+      }
+    }
+
+    checkSchedule();
+    const timer = window.setInterval(checkSchedule, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [panelId, user]);
 
   const handleSelectInspection = (id: string) => {
     setSelectedInspectionId(id);
@@ -180,7 +230,7 @@ export default function App() {
             <div className="space-y-8">
               <PageHeader
                 title="New Inspection"
-                subtitle="Capture an image of the solar panel using your phone camera, or upload an image file."
+                subtitle="Capture an image of the solar panel using the laptop camera, or upload an image file."
               />
               <CameraCapture panelId={panelId} onInspectionComplete={handleInspectionComplete} />
             </div>
@@ -231,6 +281,68 @@ export default function App() {
   );
 }
 
+async function captureScheduledImage(cameraDevice: string): Promise<Blob> {
+  const requestedDevice = cameraDevice.trim().toLowerCase();
+  const initialStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  let stream = initialStream;
+
+  if (requestedDevice && requestedDevice !== 'phone' && requestedDevice !== 'default') {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const matchingCamera = devices.find((device) =>
+      device.kind === 'videoinput' && device.label.toLowerCase().includes(requestedDevice)
+    );
+    if (!matchingCamera) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error(`Camera "${cameraDevice}" was not found. Check the name in Windows camera settings.`);
+    }
+    if (matchingCamera.deviceId !== stream.getVideoTracks()[0]?.getSettings().deviceId) {
+      initialStream.getTracks().forEach((track) => track.stop());
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: matchingCamera.deviceId } },
+        audio: false,
+      });
+    }
+  }
+
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error('Timed out waiting for the laptop camera.')), 10_000);
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timeout);
+        resolve();
+      };
+      video.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(new Error('Unable to read the laptop camera.'));
+      };
+    });
+    await video.play();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Unable to capture an image from the laptop camera.');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('The laptop camera returned an empty image.'));
+      }, 'image/jpeg', 0.85);
+    });
+  } finally {
+    stream.getTracks().forEach((track) => track.stop());
+    video.srcObject = null;
+  }
+}
+
 function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="animate-fade-in-up">
@@ -264,7 +376,7 @@ function AboutPage() {
           <h3 className="text-base font-semibold text-ink-900 mb-2">System Overview</h3>
           <p className="text-sm leading-relaxed text-ink-600">
             This system automates the inspection process using a camera and a trained deep learning
-            model. A phone camera captures an image of the solar panel surface, which is then sent to
+            model. The laptop camera captures an image of the solar panel surface, which is then sent to
             the AI model for analysis. The model classifies the panel's condition and identifies
             specific fault types. Each inspection result is stored in a database with the date, time,
             image, prediction, and confidence score.
@@ -295,7 +407,7 @@ function AboutPage() {
         <section className="animate-fade-in-up">
           <h3 className="text-base font-semibold text-ink-900 mb-2">Architecture</h3>
           <div className="bg-ink-950 rounded-xl p-5 font-mono text-xs text-ink-300 overflow-x-auto">
-            Phone Camera → Frontend (React) → Model Adapter → Trained ML Model → Prediction → Database → Dashboard → Notification
+            Laptop Camera → Frontend (React) → Model Adapter → Trained ML Model → Prediction → Database → Dashboard → Notification
           </div>
         </section>
 

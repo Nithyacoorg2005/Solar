@@ -32,6 +32,8 @@ export interface DashboardStats {
   total: number;
   normal: number;
   faults: number;
+  cleaning: number;
+  damage: number;
   latest: Inspection | null;
 }
 

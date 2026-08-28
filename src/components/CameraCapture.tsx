@@ -139,7 +139,6 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
       )}
 
       {error && <div className="mb-6"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-
       {/* IDLE */}
       {phase === 'idle' && (
         <div className="space-y-4 animate-fade-in">
@@ -185,7 +184,7 @@ export function CameraCapture({ panelId, onInspectionComplete }: CameraCapturePr
                 <div className="w-12 h-12 rounded-full bg-ink-100 group-hover:bg-ink-900 flex items-center justify-center transition-colors">
                   <Camera size={22} className="text-ink-600 group-hover:text-white transition-colors" />
                 </div>
-                <span className="text-sm font-medium text-ink-700">Use Phone Camera</span>
+                <span className="text-sm font-medium text-ink-700">Use Laptop Camera</span>
                 <span className="text-xs text-ink-400">Live capture</span>
               </button>
               <button

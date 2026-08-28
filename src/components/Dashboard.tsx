@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Clock, ImageOff, Calendar, TrendingUp, CheckCircle2, AlertTriangle, Bell, Droplets } from 'lucide-react';
+import { Clock, ImageOff, Calendar, TrendingUp, CheckCircle2, AlertTriangle, Bell, Droplets, PieChart } from 'lucide-react';
 import { getDashboardStats, getInspectionHistory, formatDateTime } from '@/lib/inspectionApi';
 import { getNotificationPermission } from '@/lib/notificationService';
 import type { CleaningDecision, Inspection, DashboardStats } from '@/types';
@@ -63,6 +63,13 @@ export function Dashboard({ panelId, onSelectInspection, refreshKey }: Dashboard
 
   return (
     <div className="space-y-8">
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight text-ink-900">Solar Panel Overview</h2>
+        <p className="text-sm text-ink-500 mt-1">
+          Review the latest panel condition, inspection activity, and recommended next steps.
+        </p>
+      </div>
+
       {/* Current Status — Hero Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Status card */}
@@ -171,6 +178,8 @@ export function Dashboard({ panelId, onSelectInspection, refreshKey }: Dashboard
         </div>
       </div>
 
+      <InspectionRateChart stats={stats} />
+
       {/* Recent Inspections */}
       <div className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
         <div className="px-6 py-4 border-b border-ink-100 flex items-center justify-between">
@@ -222,6 +231,59 @@ export function Dashboard({ panelId, onSelectInspection, refreshKey }: Dashboard
         )}
       </div>
     </div>
+  );
+}
+
+function InspectionRateChart({ stats }: { stats: DashboardStats | null }) {
+  const total = stats?.total ?? 0;
+  const categories = [
+    { label: 'Clean / Normal', count: stats?.normal ?? 0, color: '#2f9e44' },
+    { label: 'Cleaning Recommended', count: stats?.cleaning ?? 0, color: '#f08c00' },
+    { label: 'Damage Detected', count: stats?.damage ?? 0, color: '#d94841' },
+  ];
+  let offset = 0;
+  const segments = categories.map((category) => {
+    const percentage = total > 0 ? category.count / total * 100 : 0;
+    const end = offset + percentage;
+    const segment = `${category.color} ${offset.toFixed(2)}% ${end.toFixed(2)}%`;
+    offset = end;
+    return { ...category, percentage, segment };
+  });
+  const chartBackground = total > 0
+    ? `conic-gradient(${segments.map((segment) => segment.segment).join(', ')})`
+    : '#e5e7eb';
+
+  return (
+    <section className="bg-white rounded-2xl border border-ink-200/60 overflow-hidden">
+      <div className="px-6 py-4 border-b border-ink-100">
+        <div>
+          <h3 className="text-sm font-semibold text-ink-700 flex items-center gap-2">
+            <PieChart size={15} /> Inspection Detection Rates
+          </h3>
+          <p className="text-xs text-ink-400 mt-1">
+            A breakdown of all recorded inspections by panel condition and cleaning recommendation.
+          </p>
+        </div>
+      </div>
+      <div className="p-6 flex flex-col sm:flex-row items-center gap-8">
+        <div className="relative w-44 h-44 flex-shrink-0 rounded-full" style={{ background: chartBackground }}>
+          <div className="absolute inset-7 rounded-full bg-white flex flex-col items-center justify-center">
+            <span className="text-2xl font-semibold text-ink-900 tabular-nums">{total}</span>
+            <span className="text-xs text-ink-400">inspections</span>
+          </div>
+        </div>
+        <div className="w-full grid gap-4">
+          {segments.map((category) => (
+            <div key={category.label} className="flex items-center gap-3">
+              <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: category.color }} />
+              <span className="text-sm text-ink-600 flex-1">{category.label}</span>
+              <span className="text-sm font-semibold text-ink-900 tabular-nums">{category.percentage.toFixed(1)}%</span>
+              <span className="text-xs text-ink-400 tabular-nums w-12 text-right">{category.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 

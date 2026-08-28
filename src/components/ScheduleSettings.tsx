@@ -17,7 +17,7 @@ export function ScheduleSettings({ panelId }: ScheduleSettingsProps) {
 
   const [days, setDays] = useState<number[]>([1, 4]);
   const [time, setTime] = useState('09:00');
-  const [camera, setCamera] = useState('phone');
+  const [camera, setCamera] = useState('DroidCam');
   const [panel, setPanel] = useState(panelId);
   const [active, setActive] = useState(true);
 
@@ -153,8 +153,9 @@ export function ScheduleSettings({ panelId }: ScheduleSettingsProps) {
             value={camera}
             onChange={(e) => setCamera(e.target.value)}
             className="w-full px-4 py-2.5 text-sm bg-ink-50 border border-ink-200 rounded-xl focus:outline-none focus:border-ink-900 focus:ring-1 focus:ring-ink-900 transition-colors"
-            placeholder="e.g. phone, ip-camera-01"
+            placeholder="e.g. DroidCam, integrated webcam"
           />
+          <p className="mt-1.5 text-xs text-ink-400">Enter the camera name shown by Windows. The browser must be open when the schedule runs.</p>
         </div>
 
         {/* Active toggle */}
@@ -191,8 +192,9 @@ export function ScheduleSettings({ panelId }: ScheduleSettingsProps) {
       {/* Info note */}
       <div className="px-5 py-4 bg-ink-50 border border-ink-200 rounded-xl text-xs text-ink-500 leading-relaxed">
         <strong className="text-ink-600">Note:</strong> The browser-based scheduler checks the configured days and time
-        when the dashboard is open. For 24/7 scheduled inspections independent of the browser, a server-side cron job
-        calling the inspection API is needed. Manual inspections always work regardless of this schedule.
+        while SolarGuard is open and captures one image using the selected laptop camera. Camera permission must be granted
+        in advance. For 24/7 scheduled inspections independent of the browser, a server-side cron job calling the
+        inspection API is needed. Manual inspections always work regardless of this schedule.
       </div>
     </div>
   );
