@@ -155,7 +155,7 @@ export function ScheduleSettings({ panelId }: ScheduleSettingsProps) {
             className="w-full px-4 py-2.5 text-sm bg-ink-50 border border-ink-200 rounded-xl focus:outline-none focus:border-ink-900 focus:ring-1 focus:ring-ink-900 transition-colors"
             placeholder="e.g. DroidCam, integrated webcam"
           />
-          <p className="mt-1.5 text-xs text-ink-400">Enter the camera name shown by Windows. The browser must be open when the schedule runs.</p>
+          <p className="mt-1.5 text-xs text-ink-400">Used for the local-camera fallback. Wi-Fi DroidCam uses the configured camera relay.</p>
         </div>
 
         {/* Active toggle */}
@@ -191,10 +191,10 @@ export function ScheduleSettings({ panelId }: ScheduleSettingsProps) {
 
       {/* Info note */}
       <div className="px-5 py-4 bg-ink-50 border border-ink-200 rounded-xl text-xs text-ink-500 leading-relaxed">
-        <strong className="text-ink-600">Note:</strong> The browser-based scheduler checks the configured days and time
-        while SolarGuard is open and captures one image using the selected laptop camera. Camera permission must be granted
-        in advance. For 24/7 scheduled inspections independent of the browser, a server-side cron job calling the
-        inspection API is needed. Manual inspections always work regardless of this schedule.
+        <strong className="text-ink-600">Note:</strong> The scheduler checks the configured days and time while SolarGuard
+        is open and signed in. With Wi-Fi DroidCam configured, it receives the next phone frame from the camera relay and
+        runs the AI inspection automatically. Keep the FastAPI service and camera publisher running. Manual inspections
+        always work regardless of this schedule.
       </div>
     </div>
   );

@@ -5,3 +5,5 @@ python-multipart>=0.0.9
 pillow>=10.0
 torch>=2.4
 torchvision>=0.19
+opencv-python-headless>=4.10
+websockets>=13.0

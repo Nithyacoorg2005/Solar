@@ -9,7 +9,8 @@ import { NotificationStatus } from '@/components/NotificationStatus';
 import { AuthPage } from '@/components/AuthPage';
 import { useAuth } from '@/lib/authContext';
 import { isModelConnected } from '@/lib/modelAdapter';
-import { getSchedule, saveCapturedInspection } from '@/lib/inspectionApi';
+import { getSchedule, runInspection } from '@/lib/inspectionApi';
+import { captureFromWifiCamera } from '@/lib/cameraStream';
 
 type View = 'dashboard' | 'capture' | 'history' | 'details' | 'schedule' | 'about';
 
@@ -38,21 +39,28 @@ export default function App() {
       if (cancelled || scheduledInspectionRunning.current) return;
 
       try {
-        const schedule = await getSchedule();
+        const schedule = await getSchedule(panelId);
         if (!schedule?.is_active || schedule.days_of_week.length === 0) return;
 
         const now = new Date();
         const [scheduledHour, scheduledMinute] = schedule.inspection_time.split(':').map(Number);
-        const runKey = `${now.toDateString()}-${schedule.inspection_time}`;
+        if (!Number.isInteger(scheduledHour) || !Number.isInteger(scheduledMinute)) {
+          console.warn(`Scheduled inspection skipped: invalid time "${schedule.inspection_time}".`);
+          return;
+        }
+        const runKey = `${schedule.id}-${now.toDateString()}-${schedule.inspection_time}`;
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         const scheduledMinutes = scheduledHour * 60 + scheduledMinute;
         const minutesSinceSchedule = currentMinutes - scheduledMinutes;
         const isDue = schedule.days_of_week.includes(now.getDay())
           && minutesSinceSchedule >= 0
-          && minutesSinceSchedule <= 15;
+          && minutesSinceSchedule < 24 * 60;
 
         if (!isDue || lastScheduledRun.current === runKey) return;
-        if (!navigator.mediaDevices?.getUserMedia) {
+        const wifiCameraConfigured = Boolean(
+          import.meta.env.VITE_CAMERA_STREAM_URL && import.meta.env.VITE_CAMERA_STREAM_TOKEN,
+        );
+        if (!wifiCameraConfigured && !navigator.mediaDevices?.getUserMedia) {
           console.warn('Scheduled inspection skipped: camera access is not supported by this browser.');
           return;
         }
@@ -61,8 +69,8 @@ export default function App() {
         const imageBlob = await captureScheduledImage(schedule.camera_device);
         if (cancelled) return;
 
-        await saveCapturedInspection(schedule.panel_id, imageBlob);
         lastScheduledRun.current = runKey;
+        await runInspection(schedule.panel_id, imageBlob, 'scheduled');
         if (!cancelled) setRefreshKey((key) => key + 1);
       } catch (err) {
         console.error('Scheduled inspection failed:', err);
@@ -282,6 +290,10 @@ export default function App() {
 }
 
 async function captureScheduledImage(cameraDevice: string): Promise<Blob> {
+  if (import.meta.env.VITE_CAMERA_STREAM_URL && import.meta.env.VITE_CAMERA_STREAM_TOKEN) {
+    return captureFromWifiCamera();
+  }
+
   const requestedDevice = cameraDevice.trim().toLowerCase();
   const initialStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
   let stream = initialStream;

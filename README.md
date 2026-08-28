@@ -36,6 +36,12 @@ Windows, such as `DroidCam`, grant camera permission once, and keep SolarGuard o
 scheduled time. The browser captures one image, runs the inspection, stores it in history,
 and sends a fault notification when a fault is detected.
 
+For DroidCam over phone Wi-Fi, run `ml_service/camera_publisher.py` to bridge
+`http://PHONE_IP:4747/video` to the FastAPI WebSocket relay. Set
+`VITE_CAMERA_STREAM_URL=ws://SERVER_IP:8000/camera` and
+`VITE_CAMERA_STREAM_TOKEN` in `.env`, then restart Vite. The relay must be reachable by
+both the publisher and the browser, and SolarGuard must remain open and signed in.
+
 Apply the SQL migrations in `supabase/migrations/` to your Supabase project before using the application.
 
 ## Train and run the AI model
