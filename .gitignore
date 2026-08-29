@@ -28,3 +28,4 @@ ml_service/models/
 
 # Local training dataset — do not commit images to the repository.
 Faulty_solar_panel/
+cleaned_dataset/

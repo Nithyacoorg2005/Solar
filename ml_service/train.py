@@ -1,14 +1,3 @@
-"""Train a MobileNetV3 solar-panel condition classifier from local image folders.
-
-Expected dataset layout:
-  Faulty_solar_panel/
-    Clean/
-    Bird-drop/
-    Dusty/
-    Electrical-damage/
-    Physical-Damage/
-    Snow-Covered/
-"""
 
 from __future__ import annotations
 
@@ -25,7 +14,7 @@ from torchvision import datasets, models, transforms
 IMAGE_SIZE = 224
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-DEFAULT_DATA_DIR = PROJECT_ROOT / "Faulty_solar_panel"
+DEFAULT_DATA_DIR = PROJECT_ROOT / "cleaned_dataset"
 DEFAULT_OUTPUT = SCRIPT_DIR / "models" / "solar_panel_mobilenetv3.pth"
 
 

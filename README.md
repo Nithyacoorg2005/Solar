@@ -16,27 +16,6 @@ Manually inspecting large or elevated solar panels can be difficult and time-con
 
 SolarGuard aims to provide an automated visual inspection system.
 
-### Main workflow
-
-Phone Camera
-↓
-DroidCam
-↓
-Windows Camera Device
-↓
-Browser
-↓
-React Frontend
-↓
-Inspection API
-↓
-AI / MobileNetV3 Model
-↓
-Prediction
-↓
-Database
-↓
-Dashboard / History / Notification
 
 
 ---
