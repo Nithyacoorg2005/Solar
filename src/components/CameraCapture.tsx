@@ -176,11 +176,43 @@ export function CameraCapture({
   // ==========================================================
 
   const videoRef =
-    useRef<HTMLVideoElement>(null);
+    useRef<HTMLVideoElement | null>(null);
 
 
   const streamRef =
     useRef<MediaStream | null>(null);
+
+
+  /*
+   * The stream is kept in a ref so it can be stopped immediately, but the
+   * video element is conditionally rendered. This callback runs as soon as
+   * React mounts that element, which is more reliable than a timed delay.
+   */
+  const attachStreamToVideo =
+    useCallback(
+      (video: HTMLVideoElement | null) => {
+
+        if (!video || !streamRef.current) return;
+
+        video.srcObject = streamRef.current;
+
+        void video.play().then(
+          () => {
+            setCaptureStatus(
+              scheduledCapture
+                ? 'Camera ready. Starting scheduled capture...'
+                : 'DroidCam connected. Live video is ready.'
+            );
+          }
+        ).catch(
+          (playError) => {
+            console.error('[Camera] Video play error:', playError);
+            setCameraError('Camera connected, but the video could not start.');
+          }
+        );
+      },
+      [scheduledCapture]
+    );
 
 
   const fileInputRef =
@@ -441,7 +473,7 @@ export function CameraCapture({
           // Request camera
           // ----------------------------------------------------
 
-          const stream =
+          let stream =
             await navigator.mediaDevices.getUserMedia(
               {
                 video: {
@@ -466,6 +498,40 @@ export function CameraCapture({
             );
 
 
+          /*
+           * On Windows, DroidCam is a virtual camera. A generic request can
+           * silently choose the built-in webcam instead, even while DroidCam
+           * says it is connected. Once permission has been granted, device
+           * labels are available and we can switch to DroidCam explicitly.
+           */
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const droidCam = devices.find(
+            (device) =>
+              device.kind === 'videoinput' &&
+              device.label.toLowerCase().includes('droidcam')
+          );
+          const activeTrack = stream.getVideoTracks()[0];
+
+          if (
+            droidCam &&
+            activeTrack?.getSettings().deviceId !== droidCam.deviceId
+          ) {
+
+            stream.getTracks().forEach((track) => track.stop());
+
+            stream = await navigator.mediaDevices.getUserMedia(
+              {
+                video: {
+                  deviceId: { exact: droidCam.deviceId },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                },
+                audio: false,
+              }
+            );
+          }
+
+
           console.log(
             '[Camera] Camera stream received:',
             stream
@@ -486,113 +552,6 @@ export function CameraCapture({
 
           setCameraActive(
             true
-          );
-
-
-          // ----------------------------------------------------
-          // Attach stream after render
-          // ----------------------------------------------------
-
-          setTimeout(
-            () => {
-
-              const video =
-                videoRef.current;
-
-
-              if (!video) {
-
-                console.error(
-                  '[Camera] Video element not found.'
-                );
-
-
-                setCameraError(
-                  'Video element could not be initialized.'
-                );
-
-
-                return;
-
-              }
-
-
-              console.log(
-                '[Camera] Attaching stream...'
-              );
-
-
-              video.srcObject =
-                stream;
-
-
-              video.onloadedmetadata =
-                async () => {
-
-                  try {
-
-                    await video.play();
-
-
-                    console.log(
-                      '[Camera] Video playing:',
-                      video.videoWidth,
-                      'x',
-                      video.videoHeight
-                    );
-
-
-                    /*
-                     * IMPORTANT:
-                     *
-                     * We DO NOT start a timer here.
-                     *
-                     * Previously the code waited 3 seconds
-                     * and enabled automatic capture here.
-                     *
-                     * That caused the camera to capture
-                     * immediately after opening.
-                     *
-                     * Now we only show the live video.
-                     */
-
-                    if (
-                      scheduledCapture
-                    ) {
-
-                      setCaptureStatus(
-                        'Camera ready. Starting scheduled capture...'
-                      );
-
-                    } else {
-
-                      setCaptureStatus(
-                        'DroidCam connected. Live video is ready.'
-                      );
-
-                    }
-
-                  } catch (
-                    playError
-                  ) {
-
-                    console.error(
-                      '[Camera] Video play error:',
-                      playError
-                    );
-
-
-                    setCameraError(
-                      'Camera connected, but the video could not start.'
-                    );
-
-                  }
-
-                };
-
-
-            },
-            100
           );
 
 
@@ -1761,7 +1720,10 @@ export function CameraCapture({
             <div className="relative bg-ink-950 rounded-2xl overflow-hidden animate-scale-in">
 
               <video
-                ref={videoRef}
+                ref={(video) => {
+                  videoRef.current = video;
+                  attachStreamToVideo(video);
+                }}
                 autoPlay
                 playsInline
                 muted
